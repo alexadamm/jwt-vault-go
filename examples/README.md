@@ -1,17 +1,10 @@
 # JWT-Vault-Go Examples
 
-This directory contains example implementations of JWT-Vault-Go.
+This directory contains various examples demonstrating the usage of JWT-Vault-Go.
 
-## Basic Example
+## Setup
 
-The basic example demonstrates:
-- Initializing JWT-Vault
-- Creating custom claims
-- Signing tokens
-- Verifying tokens
-- Health checking
-
-To run the basic example:
+Before running any example, make sure you have Vault running and configured:
 
 ```bash
 # Start Vault dev server
@@ -21,12 +14,6 @@ vault server -dev
 export VAULT_ADDR='http://127.0.0.1:8200'
 export VAULT_TOKEN='dev-token'
 
-# Enable transit engine
+# Enable transit engine and create key
 vault secrets enable transit
-
-# Create signing key
 vault write -f transit/keys/jwt-key type=ecdsa-p256
-
-# Run the example
-cd examples/basic
-go run main.go
