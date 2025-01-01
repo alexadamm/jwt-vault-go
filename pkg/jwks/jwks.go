@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 )
@@ -82,7 +83,12 @@ func (c *Cache) fetchAndCache(ctx context.Context, kid string) (*ecdsa.PublicKey
 		}
 	}
 
-	key, err := c.keyFetch(ctx, kid)
+	kidParts := strings.Split(kid, ":")
+	if len(kidParts) != 2 {
+		return nil, fmt.Errorf("invalid kid format: %s", kid)
+	}
+
+	key, err := c.keyFetch(ctx, kidParts[1])
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch key: %w", err)
 	}
