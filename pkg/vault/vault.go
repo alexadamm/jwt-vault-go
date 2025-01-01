@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
+	"strings"
 
 	"github.com/hashicorp/vault/api"
 )
@@ -130,7 +131,7 @@ func (c *Client) GetPublicKey(ctx context.Context, version string) (*ecdsa.Publi
 }
 
 // SignData signs data using the transit engine
-func (c *Client) SignData(ctx context.Context, data []byte) ([]byte, error) {
+func (c *Client) SignData(ctx context.Context, data []byte) (signatureDer []byte, err error) {
 	input := base64.StdEncoding.EncodeToString(data)
 	path := fmt.Sprintf("transit/sign/%s", c.transitPath)
 
@@ -147,10 +148,20 @@ func (c *Client) SignData(ctx context.Context, data []byte) ([]byte, error) {
 
 	signature, ok := secret.Data["signature"].(string)
 	if !ok {
-		return nil, fmt.Errorf("invalid signature format")
+		return nil, fmt.Errorf("signature not found in Vault response")
 	}
 
-	return base64.StdEncoding.DecodeString(signature)
+	parts := strings.Split(signature, ":")
+	if len(parts) < 3 {
+		return nil, fmt.Errorf("unexpected signature format")
+	}
+	signatureBase64 := parts[len(parts)-1]
+	signatureDer, err = base64.StdEncoding.DecodeString(signatureBase64)
+	if err != nil {
+		return nil, fmt.Errorf("error decoding signature: %v", err)
+	}
+
+	return signatureDer, nil
 }
 
 // RotateKey triggers a key rotation in the transit engine

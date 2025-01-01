@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"crypto/sha256"
+	"encoding/asn1"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -98,15 +99,46 @@ func (j *jwtVault) Sign(ctx context.Context, claims interface{}) (string, error)
 	signingInput := headerB64 + "." + claimsB64
 
 	// Sign the data
-	signature, err := j.vaultClient.SignData(ctx, []byte(signingInput))
+	signatureDer, err := j.vaultClient.SignData(ctx, []byte(signingInput))
+
 	if err != nil {
 		return "", fmt.Errorf("failed to sign token: %w", err)
 	}
 
-	signatureB64 := base64.RawURLEncoding.EncodeToString(signature)
+	signatureRaw, err := convertDerToRawEcdsaSignature(signatureDer)
+	if err != nil {
+		return "", fmt.Errorf("error converting signature to raw: %v", err)
+	}
+	signatureB64 := base64.RawURLEncoding.EncodeToString(signatureRaw)
 
 	// Combine to form final token
 	return fmt.Sprintf("%s.%s.%s", headerB64, claimsB64, signatureB64), nil
+}
+
+type ECDSASignature struct {
+	R, S *big.Int
+}
+
+// convertDerToRawEcdsaSignature converts a DER encoded ECDSA signature to a raw signature
+func convertDerToRawEcdsaSignature(signatureDer []byte) ([]byte, error) {
+	// convert der to raw ecdsa signature
+	var ecdsaSig ECDSASignature
+	if _, err := asn1.Unmarshal(signatureDer, &ecdsaSig); err != nil {
+		return nil, fmt.Errorf("error unmarshaling DER signature: %v", err)
+	}
+
+	rBytes := ecdsaSig.R.Bytes()
+	sBytes := ecdsaSig.S.Bytes()
+
+	// ensure r and s are 32 bytes each
+	rPadded := make([]byte, 32)
+	sPadded := make([]byte, 32)
+	copy(rPadded[32-len(rBytes):], rBytes)
+	copy(sPadded[32-len(sBytes):], sBytes)
+
+	signatureRaw := append(rPadded, sPadded...)
+
+	return signatureRaw, nil
 }
 
 // Verify validates a JWT and returns the verified token
