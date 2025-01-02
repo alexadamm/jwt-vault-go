@@ -3,6 +3,7 @@ package token
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"testing"
 	"time"
 )
@@ -14,11 +15,14 @@ type TestClaims struct {
 }
 
 func TestJWTVault(t *testing.T) {
+	if os.Getenv("VAULT_ADDR") == "" {
+		t.Skip("Skipping vault integration test (VAULT_ADDR not set)")
+	}
 	ctx := context.Background()
 
 	jv, err := New(Config{
-		VaultAddr:      "http://localhost:8200",
-		VaultToken:     "test-token",
+		VaultAddr:      os.Getenv("VAULT_ADDR"),
+		VaultToken:     os.Getenv("VAULT_TOKEN"),
 		TransitKeyPath: "jwt-test",
 	})
 	if err != nil {
