@@ -17,9 +17,9 @@ func TestCache(t *testing.T) {
 	}
 
 	fetchCount := 0
-	mockFetch := func(ctx context.Context, kid string) (*ecdsa.PublicKey, error) {
+	mockFetch := func(ctx context.Context, version string) (*ecdsa.PublicKey, error) {
 		fetchCount++
-		if kid == "valid-key" {
+    if version == "1" {
 			return &testKey.PublicKey, nil
 		}
 		return nil, errors.New("key not found")
@@ -32,7 +32,7 @@ func TestCache(t *testing.T) {
 	})
 
 	t.Run("Get Valid Key", func(t *testing.T) {
-		key, err := cache.GetKey(context.Background(), "valid-key")
+    key, err := cache.GetKey(context.Background(), "valid-key:1")
 		if err != nil {
 			t.Errorf("GetKey failed: %v", err)
 		}
@@ -44,7 +44,7 @@ func TestCache(t *testing.T) {
 		}
 
 		// Second fetch should use cache
-		_, err = cache.GetKey(context.Background(), "valid-key")
+    _, err = cache.GetKey(context.Background(), "valid-key:1")
 		if err != nil {
 			t.Errorf("Second GetKey failed: %v", err)
 		}
@@ -54,7 +54,7 @@ func TestCache(t *testing.T) {
 	})
 
 	t.Run("Get Invalid Key", func(t *testing.T) {
-		_, err := cache.GetKey(context.Background(), "invalid-key")
+    _, err := cache.GetKey(context.Background(), "invalid-key:2")
 		if err == nil {
 			t.Error("Expected error for invalid key")
 		}
@@ -64,7 +64,7 @@ func TestCache(t *testing.T) {
 		initialCount := fetchCount
 		time.Sleep(150 * time.Millisecond)
 
-		_, err := cache.GetKey(context.Background(), "valid-key")
+    _, err := cache.GetKey(context.Background(), "valid-key:1")
 		if err != nil {
 			t.Errorf("GetKey after expiry failed: %v", err)
 		}
