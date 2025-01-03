@@ -150,7 +150,7 @@ fmt.Printf("Health Status: %v\n", health.Message)
 ```
 
 ## Examples
-See the [https://github.com/alexadamm/jwt-vault-go/tree/main/examples](examples) directory for more examples.
+See the [examples](examples) directory for more examples.
 
 ## Contributing
 Contributions are welcome! Please read our Contributing Guidelines for details.
