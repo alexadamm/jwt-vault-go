@@ -1,0 +1,19 @@
+services:
+  vault:
+    build:
+      context: .
+      dockerfile: Dockerfile.prod
+    volumes:
+      - vault-data:/vault/file
+    ports:
+      - "8200:8200"
+    cap_add:
+      - IPC_LOCK
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:8200/v1/sys/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  vault-data:

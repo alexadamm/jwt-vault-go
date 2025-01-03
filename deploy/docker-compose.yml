@@ -1,0 +1,17 @@
+services:
+  vault:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8200:8200"
+    environment:
+      - VAULT_DEV_ROOT_TOKEN_ID=dev-root-token
+      - TRANSIT_KEY_NAME=jwt-key-ES256
+    cap_add:
+      - IPC_LOCK
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:8200/v1/sys/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5

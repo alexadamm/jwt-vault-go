@@ -1,0 +1,20 @@
+FROM vault:1.13.3
+
+# Install necessary tools
+RUN apk add --no-cache curl jq netcat-openbsd
+
+COPY config /vault/config/
+COPY init-prod.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/init-prod.sh
+
+# Create directories
+RUN mkdir -p /vault/file && \
+    chown -R vault:vault /vault/file
+
+# Remove any dev environment variables
+ENV VAULT_ADDR='http://127.0.0.1:8200'
+
+USER vault
+
+# Start vault with config and init script
+CMD ["sh", "-c", "vault server -config=/vault/config/config.hcl & sleep 2 && /usr/local/bin/init-prod.sh && tail -f /dev/null"]
