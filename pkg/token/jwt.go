@@ -153,6 +153,22 @@ func (j *jwtVault) Verify(ctx context.Context, tokenString string) (*VerifiedTok
 		return nil, ErrInvalidToken
 	}
 
+	// Parse and validate claims
+	claimsJSON, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return nil, ErrInvalidToken
+	}
+
+	var standardClaims StandardClaims
+	if err := json.Unmarshal(claimsJSON, &standardClaims); err != nil {
+		return nil, ErrInvalidClaims
+	}
+
+	// Validate expiry
+	if err := validateClaims(&standardClaims); err != nil {
+		return nil, err
+	}
+
 	// Get the algorithm for verification
 	algorithm, err := algorithms.Get(header.Alg)
 	if err != nil {
@@ -179,24 +195,6 @@ func (j *jwtVault) Verify(ctx context.Context, tokenString string) (*VerifiedTok
 	signingInput := parts[0] + "." + parts[1]
 	if err := algorithm.Verify([]byte(signingInput), signature, publicKey); err != nil {
 		return nil, err
-	}
-
-	// Parse and validate claims
-	claimsJSON, err := base64.RawURLEncoding.DecodeString(parts[1])
-	if err != nil {
-		return nil, ErrInvalidToken
-	}
-
-	var standardClaims StandardClaims
-	if err := json.Unmarshal(claimsJSON, &standardClaims); err != nil {
-		return nil, ErrInvalidClaims
-	}
-
-	// Validate expiry
-	if standardClaims.ExpiresAt != 0 {
-		if time.Unix(standardClaims.ExpiresAt, 0).Before(time.Now()) {
-			return nil, ErrTokenExpired
-		}
 	}
 
 	// Parse custom claims if present

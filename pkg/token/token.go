@@ -48,6 +48,28 @@ type Config struct {
 	Metrics *MetricsConfig
 }
 
+// validateClaims validates the standard claims
+func validateClaims(claims *StandardClaims) error {
+	now := time.Now().Unix()
+
+	// Check expiry
+	if claims.ExpiresAt != 0 && now >= claims.ExpiresAt {
+		return ErrTokenExpired
+	}
+
+	// Check not before
+	if claims.NotBefore != 0 && now < claims.NotBefore {
+		return ErrTokenNotValidYet
+	}
+
+	// Check issued at
+	if claims.IssuedAt != 0 && now < claims.IssuedAt {
+		return ErrTokenUsedBeforeIssued
+	}
+
+	return nil
+}
+
 // RetryConfig configures the retry behavior
 type RetryConfig struct {
 	MaxAttempts    int
