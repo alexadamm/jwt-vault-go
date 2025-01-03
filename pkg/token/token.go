@@ -2,8 +2,6 @@ package token
 
 import (
 	"context"
-	"crypto/ecdsa"
-	"errors"
 	"time"
 )
 
@@ -16,7 +14,7 @@ type JWTVault interface {
 	Verify(ctx context.Context, token string) (*VerifiedToken, error)
 
 	// GetPublicKey retrieves a public key for the given key ID
-	GetPublicKey(ctx context.Context, kid string) (*ecdsa.PublicKey, error)
+	GetPublicKey(ctx context.Context, kid string) (interface{}, error)
 
 	// RotateKey triggers a rotation of the signing key
 	RotateKey(ctx context.Context) error
@@ -35,6 +33,10 @@ type Config struct {
 
 	// TransitKeyPath is the path to the transit key in Vault
 	TransitKeyPath string
+
+	// Algorithm specifies the signing algorithm (e.g., "ES256", "RS256")
+	// Defaults to "ES256" if not specified
+	Algorithm string
 
 	// CacheTTL is the TTL for the JWKS cache
 	CacheTTL time.Duration
@@ -106,14 +108,3 @@ type HealthStatus struct {
 	// Details contains detailed health check information
 	Details map[string]interface{}
 }
-
-// Common errors
-var (
-	ErrInvalidToken     = errors.New("invalid token")
-	ErrTokenExpired     = errors.New("token has expired")
-	ErrInvalidSignature = errors.New("invalid token signature")
-	ErrMissingKID       = errors.New("token is missing key ID (kid)")
-	ErrInvalidClaims    = errors.New("invalid token claims")
-	ErrKeyNotFound      = errors.New("signing key not found")
-	ErrVaultUnreachable = errors.New("vault server is unreachable")
-)
