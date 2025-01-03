@@ -3,16 +3,24 @@ package jwks
 import (
 	"context"
 	"crypto/ecdsa"
+	"crypto/rsa"
 	"fmt"
 	"strings"
 	"sync"
 	"time"
 )
 
+// KeyType represents the type of cryptographic key
+type KeyType int
+
+const (
+	KeyTypeECDSA KeyType = iota
+	KeyTypeRSA
+)
+
 // Cache represents a thread-safe cache for JWKS
 type Cache struct {
 	sync.RWMutex
-	// keys is a map of kid to cached key
 	keys     map[string]*cachedKey
 	maxAge   time.Duration
 	keyFetch KeyFetchFunc
@@ -20,13 +28,14 @@ type Cache struct {
 
 // cachedKey represents a cached public key with metadata
 type cachedKey struct {
-	key       *ecdsa.PublicKey
+	key       interface{} // Can be *ecdsa.PublicKey or *rsa.PublicKey
+	keyType   KeyType
 	lastUsed  time.Time
 	fetchedAt time.Time
 }
 
 // KeyFetchFunc defines how to retrieve a public key from the source
-type KeyFetchFunc func(ctx context.Context, kid string) (*ecdsa.PublicKey, error)
+type KeyFetchFunc func(ctx context.Context, kid string) (interface{}, error)
 
 // Config holds configuration for the JWKS cache
 type Config struct {
@@ -51,14 +60,35 @@ func NewCache(config Config) *Cache {
 }
 
 // GetKey retrieves a key from the cache or fetches it if not found/expired
-func (c *Cache) GetKey(ctx context.Context, kid string) (*ecdsa.PublicKey, error) {
+func (c *Cache) GetKey(ctx context.Context, kid string) (interface{}, error) {
 	if key := c.getFromCache(kid); key != nil {
 		return key, nil
 	}
 	return c.fetchAndCache(ctx, kid)
 }
 
-func (c *Cache) getFromCache(kid string) *ecdsa.PublicKey {
+// GetKeyWithType retrieves a key and its type from the cache
+func (c *Cache) GetKeyWithType(ctx context.Context, kid string) (interface{}, KeyType, error) {
+	c.RLock()
+	if cached, exists := c.keys[kid]; exists && time.Since(cached.fetchedAt) < c.maxAge {
+		cached.lastUsed = time.Now()
+		c.RUnlock()
+		return cached.key, cached.keyType, nil
+	}
+	c.RUnlock()
+
+	key, err := c.fetchAndCache(ctx, kid)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	c.RLock()
+	defer c.RUnlock()
+	cached := c.keys[kid]
+	return key, cached.keyType, nil
+}
+
+func (c *Cache) getFromCache(kid string) interface{} {
 	c.RLock()
 	defer c.RUnlock()
 
@@ -71,7 +101,7 @@ func (c *Cache) getFromCache(kid string) *ecdsa.PublicKey {
 	return nil
 }
 
-func (c *Cache) fetchAndCache(ctx context.Context, kid string) (*ecdsa.PublicKey, error) {
+func (c *Cache) fetchAndCache(ctx context.Context, kid string) (interface{}, error) {
 	c.Lock()
 	defer c.Unlock()
 
@@ -83,6 +113,7 @@ func (c *Cache) fetchAndCache(ctx context.Context, kid string) (*ecdsa.PublicKey
 		}
 	}
 
+	// Parse key ID format (format: keypath:version)
 	kidParts := strings.Split(kid, ":")
 	if len(kidParts) != 2 {
 		return nil, fmt.Errorf("invalid kid format: %s", kid)
@@ -93,8 +124,15 @@ func (c *Cache) fetchAndCache(ctx context.Context, kid string) (*ecdsa.PublicKey
 		return nil, fmt.Errorf("failed to fetch key: %w", err)
 	}
 
+	// Determine key type
+	keyType, err := determineKeyType(key)
+	if err != nil {
+		return nil, fmt.Errorf("failed to determine key type: %w", err)
+	}
+
 	c.keys[kid] = &cachedKey{
 		key:       key,
+		keyType:   keyType,
 		lastUsed:  time.Now(),
 		fetchedAt: time.Now(),
 	}
@@ -135,5 +173,17 @@ func (c *Cache) cleanup() {
 			now.Sub(cached.lastUsed) > 2*c.maxAge {
 			delete(c.keys, kid)
 		}
+	}
+}
+
+// determineKeyType identifies the type of a public key
+func determineKeyType(key interface{}) (KeyType, error) {
+	switch key.(type) {
+	case *ecdsa.PublicKey:
+		return KeyTypeECDSA, nil
+	case *rsa.PublicKey:
+		return KeyTypeRSA, nil
+	default:
+		return 0, fmt.Errorf("unsupported key type: %T", key)
 	}
 }
