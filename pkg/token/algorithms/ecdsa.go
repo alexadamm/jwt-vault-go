@@ -40,7 +40,7 @@ func NewECDSAAlgorithm(name string, hash crypto.Hash, curve ellipticCurve) Algor
 		BaseAlgorithm: BaseAlgorithm{
 			name:      name,
 			hash:      hash,
-			vaultType: fmt.Sprintf("ecdsa-%s", strings.ToLower(curve.name)),
+			vaultType: fmt.Sprintf("ecdsa-p%d", curve.bitSize),
 			keyType:   KeyTypeECDSA,
 			keySize:   curve.keySize,
 		},
