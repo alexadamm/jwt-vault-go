@@ -18,13 +18,13 @@ type ECDSASignature struct {
 // ECDSAAlgorithm implements the Algorithm interface for ECDSA signatures
 type ECDSAAlgorithm struct {
 	BaseAlgorithm
-	curve    ellipticCurve
+	curve ellipticCurve
 }
 
 type ellipticCurve struct {
-	name      string // P-256, P-384, P-521
-	bitSize   int
-	keySize   int    // Size in bytes for R and S components
+	name    string // P-256, P-384, P-521
+	bitSize int
+	keySize int // Size in bytes for R and S components
 }
 
 var (

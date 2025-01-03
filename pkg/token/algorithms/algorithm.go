@@ -47,11 +47,11 @@ const (
 
 // BaseAlgorithm provides common functionality for all algorithms
 type BaseAlgorithm struct {
-	name        string
-	hash        crypto.Hash
-	vaultType   string
-	keyType     KeyType
-	keySize     int // Size in bytes for signature components
+	name      string
+	hash      crypto.Hash
+	vaultType string
+	keyType   KeyType
+	keySize   int // Size in bytes for signature components
 }
 
 func (b *BaseAlgorithm) Name() string {
