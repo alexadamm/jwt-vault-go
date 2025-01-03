@@ -3,6 +3,7 @@ package vault
 import (
 	"context"
 	"crypto/ecdsa"
+	"crypto/rsa"
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
@@ -18,6 +19,7 @@ type Client struct {
 	client      *api.Client
 	transitPath string
 	keyVersion  int64
+	keyType     string
 }
 
 // Config holds configuration for the Vault client
@@ -28,8 +30,27 @@ type Config struct {
 	// Token is the authentication token
 	Token string
 
-	// TransitPath is the path to the transit engine key
+	// TransitPath is the path to the transit key
 	TransitPath string
+
+	// KeyType is the type of key (e.g., "ecdsa-p256", "rsa-2048")
+	KeyType string
+}
+
+// KeyInfo represents Vault's key information
+type KeyInfo struct {
+	Type       string         `json:"type"`
+	KeyBits    int            `json:"key_bits"`
+	KeyParts   []string       `json:"key_parts"`
+	Versions   map[string]Key `json:"keys"`
+	LatestVer  int64          `json:"latest_version"`
+	MinVersion int64          `json:"min_version"`
+}
+
+// Key represents a single key version in Vault
+type Key struct {
+	CreationTime string `json:"creation_time"`
+	PublicKey    string `json:"public_key"`
 }
 
 // NewClient creates a new Vault client
@@ -44,9 +65,11 @@ func NewClient(config Config) (*Client, error) {
 
 	client.SetToken(config.Token)
 
+	// Create client instance
 	vc := &Client{
 		client:      client,
 		transitPath: config.TransitPath,
+		keyType:     config.KeyType,
 	}
 
 	// Get initial key version
@@ -56,7 +79,41 @@ func NewClient(config Config) (*Client, error) {
 	}
 	vc.keyVersion = version
 
+	// Validate key type matches configuration
+	if err := vc.validateKeyType(); err != nil {
+		return nil, err
+	}
+
 	return vc, nil
+}
+
+// validateKeyType checks if the existing key matches the configured type
+func (c *Client) validateKeyType() error {
+	path := fmt.Sprintf("transit/keys/%s", c.transitPath)
+	secret, err := c.client.Logical().Read(path)
+	if err != nil {
+		return fmt.Errorf("failed to read key info: %w", err)
+	}
+
+	if secret == nil {
+		return fmt.Errorf("key not found at path: %s", c.transitPath)
+	}
+
+	var keyInfo KeyInfo
+	keyData, err := json.Marshal(secret.Data)
+	if err != nil {
+		return fmt.Errorf("failed to marshal key data: %w", err)
+	}
+
+	if err := json.Unmarshal(keyData, &keyInfo); err != nil {
+		return fmt.Errorf("failed to unmarshal key info: %w", err)
+	}
+
+	if keyInfo.Type != c.keyType {
+		return fmt.Errorf("key type mismatch: expected %s, got %s", c.keyType, keyInfo.Type)
+	}
+
+	return nil
 }
 
 // GetCurrentKeyVersion retrieves the current version of the transit key
@@ -71,21 +128,21 @@ func (c *Client) GetCurrentKeyVersion() (int64, error) {
 		return 0, fmt.Errorf("key not found at path: %s", c.transitPath)
 	}
 
-	latestVersion, ok := secret.Data["latest_version"].(json.Number)
-	if !ok {
-		return 0, fmt.Errorf("invalid version format")
-	}
-
-	version, err := latestVersion.Int64()
+	var keyInfo KeyInfo
+	keyData, err := json.Marshal(secret.Data)
 	if err != nil {
-		return 0, fmt.Errorf("failed to parse version: %w", err)
+		return 0, fmt.Errorf("failed to marshal key data: %w", err)
 	}
 
-	return version, nil
+	if err := json.Unmarshal(keyData, &keyInfo); err != nil {
+		return 0, fmt.Errorf("failed to unmarshal key info: %w", err)
+	}
+
+	return keyInfo.LatestVer, nil
 }
 
 // GetPublicKey retrieves a public key for a specific version
-func (c *Client) GetPublicKey(ctx context.Context, version string) (*ecdsa.PublicKey, error) {
+func (c *Client) GetPublicKey(ctx context.Context, version string) (interface{}, error) {
 	path := fmt.Sprintf("transit/keys/%s", c.transitPath)
 
 	secret, err := c.client.Logical().Read(path)
@@ -93,26 +150,23 @@ func (c *Client) GetPublicKey(ctx context.Context, version string) (*ecdsa.Publi
 		return nil, fmt.Errorf("failed to read public key: %w", err)
 	}
 
-	if secret == nil {
-		return nil, fmt.Errorf("key not found")
+	var keyInfo KeyInfo
+	keyData, err := json.Marshal(secret.Data)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal key data: %w", err)
 	}
 
-	keys, ok := secret.Data["keys"].(map[string]interface{})
-	if !ok {
-		return nil, fmt.Errorf("invalid key data format")
+	if err := json.Unmarshal(keyData, &keyInfo); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal key info: %w", err)
 	}
 
-	keyData, ok := keys[version].(map[string]interface{})
+	key, ok := keyInfo.Versions[version]
 	if !ok {
 		return nil, fmt.Errorf("version %s not found", version)
 	}
 
-	publicKey, ok := keyData["public_key"].(string)
-	if !ok {
-		return nil, fmt.Errorf("public key not found")
-	}
-
-	block, _ := pem.Decode([]byte(publicKey))
+	// Parse PEM-encoded public key
+	block, _ := pem.Decode([]byte(key.PublicKey))
 	if block == nil {
 		return nil, fmt.Errorf("failed to decode PEM block")
 	}
@@ -122,46 +176,52 @@ func (c *Client) GetPublicKey(ctx context.Context, version string) (*ecdsa.Publi
 		return nil, fmt.Errorf("failed to parse public key: %w", err)
 	}
 
-	ecKey, ok := pub.(*ecdsa.PublicKey)
-	if !ok {
-		return nil, fmt.Errorf("key is not ECDSA")
+	// Validate key type
+	switch c.keyType {
+	case "ecdsa-p256", "ecdsa-p384", "ecdsa-p521":
+		if _, ok := pub.(*ecdsa.PublicKey); !ok {
+			return nil, fmt.Errorf("expected ECDSA key, got %T", pub)
+		}
+	case "rsa-2048", "rsa-3072", "rsa-4096":
+		if _, ok := pub.(*rsa.PublicKey); !ok {
+			return nil, fmt.Errorf("expected RSA key, got %T", pub)
+		}
 	}
 
-	return ecKey, nil
+	return pub, nil
 }
 
 // SignData signs data using the transit engine
-func (c *Client) SignData(ctx context.Context, data []byte) (signatureDer []byte, err error) {
+func (c *Client) SignData(ctx context.Context, data []byte) (string, error) {
 	input := base64.StdEncoding.EncodeToString(data)
 	path := fmt.Sprintf("transit/sign/%s", c.transitPath)
 
-	secret, err := c.client.Logical().Write(path, map[string]interface{}{
+	// Prepare signing options based on key type
+	params := map[string]interface{}{
 		"input": input,
-	})
+	}
+
+	// Add specific options for RSA-PSS if needed
+	if strings.HasSuffix(c.keyType, "-pss") {
+		params["prehashed"] = false
+		params["salt_length"] = "hash" // Use same length as hash
+	}
+
+	secret, err := c.client.Logical().Write(path, params)
 	if err != nil {
-		return nil, fmt.Errorf("failed to sign data: %w", err)
+		return "", fmt.Errorf("failed to sign data: %w", err)
 	}
 
 	if secret == nil {
-		return nil, fmt.Errorf("no signature returned")
+		return "", fmt.Errorf("no signature returned")
 	}
 
 	signature, ok := secret.Data["signature"].(string)
 	if !ok {
-		return nil, fmt.Errorf("signature not found in Vault response")
+		return "", fmt.Errorf("signature not found in Vault response")
 	}
 
-	parts := strings.Split(signature, ":")
-	if len(parts) < 3 {
-		return nil, fmt.Errorf("unexpected signature format")
-	}
-	signatureBase64 := parts[len(parts)-1]
-	signatureDer, err = base64.StdEncoding.DecodeString(signatureBase64)
-	if err != nil {
-		return nil, fmt.Errorf("error decoding signature: %v", err)
-	}
-
-	return signatureDer, nil
+	return signature, nil
 }
 
 // RotateKey triggers a key rotation in the transit engine
