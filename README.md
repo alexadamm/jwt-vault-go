@@ -1,6 +1,6 @@
 # JWT-Vault-Go
 
-JWT-Vault-Go is a Go library that provides seamless integration between JWT (JSON Web Tokens) and HashiCorp Vault for secure token signing and verification.
+JWT-Vault-Go is a Go library that provides seamless integration between JWT (JSON Web Tokens) and [HashiCorp Vault](https://github.com/hashicorp/vault) for secure token signing and verification.
 
 ## Features
 
@@ -153,7 +153,7 @@ fmt.Printf("Health Status: %v\n", health.Message)
 See the [examples](examples) directory for more examples.
 
 ## Contributing
-Contributions are welcome! Please read our Contributing Guidelines for details.
+Contributions are welcome! Please read our [Contributing Guidelines](CONTRIBUTING.md) for details.
 
 ## License
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
