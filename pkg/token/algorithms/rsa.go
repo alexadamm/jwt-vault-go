@@ -24,11 +24,21 @@ const (
 // NewRSAAlgorithm creates a new RSA algorithm instance
 func NewRSAAlgorithm(name string, hash crypto.Hash, pad padding) Algorithm {
 	var vaultType string
+	// Map RSA key size based on hash size
+	keySize := "2048" // Default to 2048 for SHA-256
+	switch hash {
+	case crypto.SHA384:
+		keySize = "3072"
+	case crypto.SHA512:
+		keySize = "4096"
+	}
+
+	// Set Vault key type based on padding
 	switch pad {
 	case paddingPKCS1v15:
-		vaultType = fmt.Sprintf("rsa-%d-pkcs1v15", hash.Size()*8)
+		vaultType = fmt.Sprintf("rsa-%s", keySize)
 	case paddingPSS:
-		vaultType = fmt.Sprintf("rsa-%d-pss", hash.Size()*8)
+		vaultType = fmt.Sprintf("rsa-%s", keySize)
 	}
 
 	return &RSAAlgorithm{
