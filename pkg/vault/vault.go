@@ -2,6 +2,7 @@ package vault
 
 import (
 	"context"
+	"crypto"
 	"crypto/ecdsa"
 	"crypto/rsa"
 	"crypto/x509"
@@ -20,6 +21,7 @@ type Client struct {
 	transitPath string
 	keyVersion  int64
 	keyType     string
+	hash        crypto.Hash
 }
 
 // Config holds configuration for the Vault client
@@ -65,11 +67,25 @@ func NewClient(config Config) (*Client, error) {
 
 	client.SetToken(config.Token)
 
+	// Determine hash based on key type
+	var hash crypto.Hash
+	switch {
+	case strings.Contains(config.KeyType, "256"):
+		hash = crypto.SHA256
+	case strings.Contains(config.KeyType, "384"):
+		hash = crypto.SHA384
+	case strings.Contains(config.KeyType, "512"):
+		hash = crypto.SHA512
+	default:
+		hash = crypto.SHA256
+	}
+
 	// Create client instance
 	vc := &Client{
 		client:      client,
 		transitPath: config.TransitPath,
 		keyType:     config.KeyType,
+		hash:        hash,
 	}
 
 	// Get initial key version
@@ -193,18 +209,19 @@ func (c *Client) GetPublicKey(ctx context.Context, version string) (interface{},
 
 // SignData signs data using the transit engine
 func (c *Client) SignData(ctx context.Context, data []byte) (string, error) {
-	input := base64.StdEncoding.EncodeToString(data)
+	// Hash the input data first
+	hash := c.hash.New()
+	hash.Write(data)
+	digest := hash.Sum(nil)
+
+	input := base64.StdEncoding.EncodeToString(digest)
 	path := fmt.Sprintf("transit/sign/%s", c.transitPath)
 
-	// Prepare signing options based on key type
+	// Prepare signing parameters
 	params := map[string]interface{}{
-		"input": input,
-	}
-
-	// Add specific options for RSA-PSS if needed
-	if strings.HasSuffix(c.keyType, "-pss") {
-		params["prehashed"] = false
-		params["salt_length"] = "hash" // Use same length as hash
+		"input":          input,
+		"prehashed":      true,
+		"hash_algorithm": fmt.Sprintf("sha2-%d", c.hash.Size()*8),
 	}
 
 	secret, err := c.client.Logical().Write(path, params)
