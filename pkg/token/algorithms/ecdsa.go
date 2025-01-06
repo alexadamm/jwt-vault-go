@@ -124,6 +124,11 @@ func (e *ECDSAAlgorithm) Verify(message, signature []byte, key interface{}) erro
 	return nil
 }
 
+// SigningParams returns algorithm-specific Vault signing parameters
+func (e *ECDSAAlgorithm) SigningParams() map[string]interface{} {
+	return e.BaseAlgorithm.SigningParams()
+}
+
 // Register predefined ECDSA algorithms
 func init() {
 	Register(NewECDSAAlgorithm("ES256", crypto.SHA256, p256))

@@ -27,7 +27,7 @@ func main() {
 
 	// Protected endpoint
 	http.Handle("/api/protected", jwtAuthMiddleware(http.HandlerFunc(protectedHandler)))
-	
+
 	// Login endpoint for demo
 	http.HandleFunc("/api/login", loginHandler)
 

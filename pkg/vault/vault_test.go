@@ -4,11 +4,11 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"crypto/rsa"
-	"fmt"
 	"os"
 	"strings"
 	"testing"
 
+	"github.com/alexadamm/jwt-vault-go/pkg/token/algorithms"
 	"github.com/hashicorp/vault/api"
 )
 
@@ -19,30 +19,35 @@ func TestVaultClient(t *testing.T) {
 
 	testCases := []struct {
 		name        string
+		algorithm   string
 		keyType     string
 		transitPath string
 		wantKeyType interface{}
 	}{
 		{
 			name:        "ECDSA P-256",
+			algorithm:   "ES256",
 			keyType:     "ecdsa-p256",
 			transitPath: "jwt-test-es256",
 			wantKeyType: &ecdsa.PublicKey{},
 		},
 		{
 			name:        "ECDSA P-384",
+			algorithm:   "ES384",
 			keyType:     "ecdsa-p384",
 			transitPath: "jwt-test-es384",
 			wantKeyType: &ecdsa.PublicKey{},
 		},
 		{
 			name:        "RSA 2048",
+			algorithm:   "RS256",
 			keyType:     "rsa-2048",
 			transitPath: "jwt-test-rs256",
 			wantKeyType: &rsa.PublicKey{},
 		},
 		{
 			name:        "RSA 4096 PSS",
+			algorithm:   "PS512",
 			keyType:     "rsa-4096-pss",
 			transitPath: "jwt-test-ps512",
 			wantKeyType: &rsa.PublicKey{},
@@ -55,13 +60,18 @@ func TestVaultClient(t *testing.T) {
 				Address:     os.Getenv("VAULT_ADDR"),
 				Token:       os.Getenv("VAULT_TOKEN"),
 				TransitPath: tc.transitPath,
-				KeyType:     tc.keyType,
 			}
 
 			// Create test key if it doesn't exist
 			setupTestKey(t, config)
 
-			client, err := NewClient(config)
+			// Get algorithm
+			algorithm, err := algorithms.Get(tc.algorithm)
+			if err != nil {
+				t.Fatalf("Failed to get algorithm: %v", err)
+			}
+
+			client, err := NewClient(config, algorithm)
 			if err != nil {
 				t.Fatalf("Failed to create vault client: %v", err)
 			}
@@ -143,14 +153,5 @@ func setupTestKey(t *testing.T, config Config) {
 		if !strings.Contains(err.Error(), "path is already in use") {
 			t.Fatalf("Failed to mount transit engine: %v", err)
 		}
-	}
-
-	// Create key if it doesn't exist
-	path := fmt.Sprintf("transit/keys/%s", config.TransitPath)
-	_, err = client.Logical().Write(path, map[string]interface{}{
-		"type": config.KeyType,
-	})
-	if err != nil {
-		t.Fatalf("Failed to create test key: %v", err)
 	}
 }

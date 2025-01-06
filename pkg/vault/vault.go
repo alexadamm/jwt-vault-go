@@ -10,8 +10,8 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
-	"strings"
 
+	"github.com/alexadamm/jwt-vault-go/pkg/token/algorithms"
 	"github.com/hashicorp/vault/api"
 )
 
@@ -22,6 +22,7 @@ type Client struct {
 	keyVersion  int64
 	keyType     string
 	hash        crypto.Hash
+	algorithm   algorithms.Algorithm
 }
 
 // Config holds configuration for the Vault client
@@ -34,9 +35,6 @@ type Config struct {
 
 	// TransitPath is the path to the transit key
 	TransitPath string
-
-	// KeyType is the type of key (e.g., "ecdsa-p256", "rsa-2048")
-	KeyType string
 }
 
 // KeyInfo represents Vault's key information
@@ -56,7 +54,7 @@ type Key struct {
 }
 
 // NewClient creates a new Vault client
-func NewClient(config Config) (*Client, error) {
+func NewClient(config Config, algorithm algorithms.Algorithm) (*Client, error) {
 	vaultConfig := api.DefaultConfig()
 	vaultConfig.Address = config.Address
 
@@ -67,25 +65,13 @@ func NewClient(config Config) (*Client, error) {
 
 	client.SetToken(config.Token)
 
-	// Determine hash based on key type
-	var hash crypto.Hash
-	switch {
-	case strings.Contains(config.KeyType, "256"):
-		hash = crypto.SHA256
-	case strings.Contains(config.KeyType, "384"):
-		hash = crypto.SHA384
-	case strings.Contains(config.KeyType, "521"):
-		hash = crypto.SHA512
-	default:
-		hash = crypto.SHA256
-	}
-
 	// Create client instance
 	vc := &Client{
 		client:      client,
 		transitPath: config.TransitPath,
-		keyType:     config.KeyType,
-		hash:        hash,
+		keyType:     algorithm.VaultKeyType(),
+		hash:        algorithm.Hash(),
+		algorithm:   algorithm,
 	}
 
 	// Get initial key version
@@ -218,11 +204,8 @@ func (c *Client) SignData(ctx context.Context, data []byte) (string, error) {
 	path := fmt.Sprintf("transit/sign/%s", c.transitPath)
 
 	// Prepare signing parameters
-	params := map[string]interface{}{
-		"input":          input,
-		"prehashed":      true,
-		"hash_algorithm": fmt.Sprintf("sha2-%d", c.hash.Size()*8),
-	}
+	params := c.algorithm.SigningParams()
+	params["input"] = input
 
 	secret, err := c.client.Logical().Write(path, params)
 	if err != nil {

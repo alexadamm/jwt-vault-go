@@ -5,6 +5,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/rsa"
 	"errors"
+	"fmt"
 )
 
 var (
@@ -23,6 +24,9 @@ type Algorithm interface {
 
 	// VaultKeyType returns the required Vault Transit key type
 	VaultKeyType() string
+
+	// SigningParams returns algorithm-specific Vault signing parameters
+	SigningParams() map[string]interface{}
 
 	// ProcessVaultSignature converts a Vault signature to JWT format
 	ProcessVaultSignature(rawSignature string) ([]byte, error)
@@ -64,6 +68,13 @@ func (b *BaseAlgorithm) Hash() crypto.Hash {
 
 func (b *BaseAlgorithm) VaultKeyType() string {
 	return b.vaultType
+}
+
+func (b *BaseAlgorithm) SigningParams() map[string]interface{} {
+	return map[string]interface{}{
+		"prehashed":      true,
+		"hash_algorithm": fmt.Sprintf("sha2-%d", b.hash.Size()*8),
+	}
 }
 
 func (b *BaseAlgorithm) KeyCheck(key interface{}) error {

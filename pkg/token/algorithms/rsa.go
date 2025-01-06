@@ -108,6 +108,21 @@ func (r *RSAAlgorithm) Verify(message, signature []byte, key interface{}) error 
 	return nil
 }
 
+// SigningParams returns algorithm-specific Vault signing parameters
+func (r *RSAAlgorithm) SigningParams() map[string]interface{} {
+	params := r.BaseAlgorithm.SigningParams()
+
+	// Add RSA-specific signature algorithm
+	switch r.padding {
+	case paddingPKCS1v15:
+		params["signature_algorithm"] = "pkcs1v15"
+	case paddingPSS:
+		params["signature_algorithm"] = "pss"
+	}
+
+	return params
+}
+
 // Register predefined RSA algorithms
 func init() {
 	// Register RSASSA-PKCS1-v1_5 algorithms

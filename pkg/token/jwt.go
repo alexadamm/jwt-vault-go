@@ -52,8 +52,7 @@ func New(config Config) (JWTVault, error) {
 		Address:     config.VaultAddr,
 		Token:       config.VaultToken,
 		TransitPath: config.TransitKeyPath,
-		KeyType:     algorithm.VaultKeyType(),
-	})
+	}, algorithm)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize vault client: %w", err)
 	}
