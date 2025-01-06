@@ -18,7 +18,7 @@ type CustomClaims struct {
 
 func main() {
 	// Example of using different algorithms
-	algorithms := []string{"ES256", "ES384", "ES512", "RS256", "RS384", "RS512"}
+	algorithms := []string{"ES256", "ES384", "ES512", "RS256", "RS384", "RS512", "PS256", "PS384", "PS512"}
 
 	for _, alg := range algorithms {
 		fmt.Printf("\nTesting algorithm: %s\n", alg)

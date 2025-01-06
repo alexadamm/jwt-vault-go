@@ -12,6 +12,7 @@ import (
 type RSAAlgorithm struct {
 	BaseAlgorithm
 	padding padding
+  saltLength int8
 }
 
 type padding int
@@ -26,11 +27,15 @@ func NewRSAAlgorithm(name string, hash crypto.Hash, pad padding) Algorithm {
 	var vaultType string
 	// Map RSA key size based on hash size
 	keySize := "2048" // Default to 2048 for SHA-256
+  var saltLength int8
+  saltLength = 32
 	switch hash {
 	case crypto.SHA384:
 		keySize = "3072"
+    saltLength = 48
 	case crypto.SHA512:
 		keySize = "4096"
+    saltLength = 64
 	}
 
 	// Set Vault key type based on padding
@@ -49,6 +54,7 @@ func NewRSAAlgorithm(name string, hash crypto.Hash, pad padding) Algorithm {
 			keyType:   KeyTypeRSA,
 		},
 		padding: pad,
+    saltLength: saltLength,
 	}
 }
 
@@ -118,6 +124,7 @@ func (r *RSAAlgorithm) SigningParams() map[string]interface{} {
 		params["signature_algorithm"] = "pkcs1v15"
 	case paddingPSS:
 		params["signature_algorithm"] = "pss"
+    params["salt_length"] = r.saltLength
 	}
 
 	return params
