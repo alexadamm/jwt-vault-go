@@ -74,7 +74,7 @@ func NewClient(config Config) (*Client, error) {
 		hash = crypto.SHA256
 	case strings.Contains(config.KeyType, "384"):
 		hash = crypto.SHA384
-	case strings.Contains(config.KeyType, "512"):
+	case strings.Contains(config.KeyType, "521"):
 		hash = crypto.SHA512
 	default:
 		hash = crypto.SHA256
