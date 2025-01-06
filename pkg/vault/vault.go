@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
+	"strings"
 
 	"github.com/alexadamm/jwt-vault-go/pkg/token/algorithms"
 	"github.com/hashicorp/vault/api"
@@ -221,7 +222,12 @@ func (c *Client) SignData(ctx context.Context, data []byte) (string, error) {
 		return "", fmt.Errorf("signature not found in Vault response")
 	}
 
-	return signature, nil
+	parts := strings.Split(signature, ":")
+	if len(parts) < 3 {
+		return "", fmt.Errorf("invalid signature format")
+	}
+
+	return parts[2], nil
 }
 
 // RotateKey triggers a key rotation in the transit engine

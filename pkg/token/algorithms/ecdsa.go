@@ -3,11 +3,8 @@ package algorithms
 import (
 	"crypto"
 	"crypto/ecdsa"
-	"encoding/asn1"
-	"encoding/base64"
 	"fmt"
 	"math/big"
-	"strings"
 )
 
 // ECDSASignature represents the R and S components of an ECDSA signature
@@ -48,46 +45,6 @@ func NewECDSAAlgorithm(name string, hash crypto.Hash, curve ellipticCurve) Algor
 	}
 }
 
-// ProcessVaultSignature converts a Vault ECDSA signature from DER to raw format
-func (e *ECDSAAlgorithm) ProcessVaultSignature(rawSignature string) ([]byte, error) {
-	// Split version:keyid:signature format from Vault
-	parts := strings.Split(rawSignature, ":")
-	if len(parts) < 3 {
-		return nil, ErrInvalidSignature
-	}
-
-	signatureBase64 := parts[len(parts)-1]
-	signatureDer, err := base64.StdEncoding.DecodeString(signatureBase64)
-	if err != nil {
-		return nil, fmt.Errorf("error decoding signature: %w", err)
-	}
-
-	return e.ProcessRawSignature(signatureDer)
-}
-
-// ProcessRawSignature converts a DER-encoded ECDSA signature to raw R||S format
-func (e *ECDSAAlgorithm) ProcessRawSignature(signature []byte) ([]byte, error) {
-	var ecdsaSig ECDSASignature
-	if _, err := asn1.Unmarshal(signature, &ecdsaSig); err != nil {
-		return nil, fmt.Errorf("error unmarshaling DER signature: %w", err)
-	}
-
-	// Ensure R and S are properly padded to keySize
-	rBytes := ecdsaSig.R.Bytes()
-	sBytes := ecdsaSig.S.Bytes()
-
-	// Create padded byte slices
-	rPadded := make([]byte, e.keySize)
-	sPadded := make([]byte, e.keySize)
-
-	// Copy bytes with zero-padding on the left
-	copy(rPadded[e.keySize-len(rBytes):], rBytes)
-	copy(sPadded[e.keySize-len(sBytes):], sBytes)
-
-	// Concatenate R and S
-	return append(rPadded, sPadded...), nil
-}
-
 // Verify verifies an ECDSA signature in raw R||S format
 func (e *ECDSAAlgorithm) Verify(message, signature []byte, key interface{}) error {
 	if err := e.KeyCheck(key); err != nil {
@@ -126,7 +83,8 @@ func (e *ECDSAAlgorithm) Verify(message, signature []byte, key interface{}) erro
 
 // SigningParams returns algorithm-specific Vault signing parameters
 func (e *ECDSAAlgorithm) SigningParams() map[string]interface{} {
-	return e.BaseAlgorithm.SigningParams()
+	params := e.BaseAlgorithm.SigningParams()
+	return params
 }
 
 // Register predefined ECDSA algorithms

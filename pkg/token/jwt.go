@@ -103,21 +103,13 @@ func (j *jwtVault) Sign(ctx context.Context, claims interface{}) (string, error)
 	signingInput := headerB64 + "." + claimsB64
 
 	// Sign the data with Vault
-	signatureRaw, err := j.vaultClient.SignData(ctx, []byte(signingInput))
+	signature, err := j.vaultClient.SignData(ctx, []byte(signingInput))
 	if err != nil {
 		return "", fmt.Errorf("failed to sign token: %w", err)
 	}
 
-	// Process the signature according to the algorithm
-	processedSignature, err := j.algorithm.ProcessVaultSignature(signatureRaw)
-	if err != nil {
-		return "", fmt.Errorf("failed to process signature: %w", err)
-	}
-
-	signatureB64 := base64.RawURLEncoding.EncodeToString(processedSignature)
-
 	// Combine to form final token
-	return fmt.Sprintf("%s.%s.%s", headerB64, claimsB64, signatureB64), nil
+	return fmt.Sprintf("%s.%s.%s", headerB64, claimsB64, signature), nil
 }
 
 type ECDSASignature struct {

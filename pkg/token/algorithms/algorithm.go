@@ -28,12 +28,6 @@ type Algorithm interface {
 	// SigningParams returns algorithm-specific Vault signing parameters
 	SigningParams() map[string]interface{}
 
-	// ProcessVaultSignature converts a Vault signature to JWT format
-	ProcessVaultSignature(rawSignature string) ([]byte, error)
-
-	// ProcessRawSignature converts raw signature bytes to JWT format
-	ProcessRawSignature(signature []byte) ([]byte, error)
-
 	// Verify verifies the signature against the message
 	Verify(message, signature []byte, key interface{}) error
 
@@ -72,8 +66,9 @@ func (b *BaseAlgorithm) VaultKeyType() string {
 
 func (b *BaseAlgorithm) SigningParams() map[string]interface{} {
 	return map[string]interface{}{
-		"prehashed":      true,
-		"hash_algorithm": fmt.Sprintf("sha2-%d", b.hash.Size()*8),
+		"prehashed":            true,
+		"hash_algorithm":       fmt.Sprintf("sha2-%d", b.hash.Size()*8),
+		"marshaling_algorithm": "jws",
 	}
 }
 

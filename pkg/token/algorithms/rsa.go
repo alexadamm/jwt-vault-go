@@ -3,16 +3,14 @@ package algorithms
 import (
 	"crypto"
 	"crypto/rsa"
-	"encoding/base64"
 	"fmt"
-	"strings"
 )
 
 // RSAAlgorithm implements the Algorithm interface for RSA signatures
 type RSAAlgorithm struct {
 	BaseAlgorithm
-	padding padding
-  saltLength int8
+	padding    padding
+	saltLength int8
 }
 
 type padding int
@@ -27,15 +25,15 @@ func NewRSAAlgorithm(name string, hash crypto.Hash, pad padding) Algorithm {
 	var vaultType string
 	// Map RSA key size based on hash size
 	keySize := "2048" // Default to 2048 for SHA-256
-  var saltLength int8
-  saltLength = 32
+	var saltLength int8
+	saltLength = 32
 	switch hash {
 	case crypto.SHA384:
 		keySize = "3072"
-    saltLength = 48
+		saltLength = 48
 	case crypto.SHA512:
 		keySize = "4096"
-    saltLength = 64
+		saltLength = 64
 	}
 
 	// Set Vault key type based on padding
@@ -53,33 +51,9 @@ func NewRSAAlgorithm(name string, hash crypto.Hash, pad padding) Algorithm {
 			vaultType: vaultType,
 			keyType:   KeyTypeRSA,
 		},
-		padding: pad,
-    saltLength: saltLength,
+		padding:    pad,
+		saltLength: saltLength,
 	}
-}
-
-// ProcessVaultSignature processes RSA signatures from Vault
-func (r *RSAAlgorithm) ProcessVaultSignature(rawSignature string) ([]byte, error) {
-	// Split version:keyid:signature format from Vault
-	parts := strings.Split(rawSignature, ":")
-	if len(parts) < 3 {
-		return nil, ErrInvalidSignature
-	}
-
-	// The last part contains the base64-encoded signature
-	signatureBase64 := parts[len(parts)-1]
-	signature, err := base64.StdEncoding.DecodeString(signatureBase64)
-	if err != nil {
-		return nil, fmt.Errorf("error decoding signature: %w", err)
-	}
-
-	return signature, nil
-}
-
-// ProcessRawSignature for RSA just returns the signature as is
-// RSA signatures don't need special processing unlike ECDSA
-func (r *RSAAlgorithm) ProcessRawSignature(signature []byte) ([]byte, error) {
-	return signature, nil
 }
 
 // Verify verifies an RSA signature
@@ -124,7 +98,7 @@ func (r *RSAAlgorithm) SigningParams() map[string]interface{} {
 		params["signature_algorithm"] = "pkcs1v15"
 	case paddingPSS:
 		params["signature_algorithm"] = "pss"
-    params["salt_length"] = r.saltLength
+		params["salt_length"] = r.saltLength
 	}
 
 	return params
