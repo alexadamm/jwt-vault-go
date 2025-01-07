@@ -3,8 +3,7 @@ package token
 import (
 	"context"
 	"crypto/ecdsa"
-	"crypto/sha256"
-	"encoding/asn1"
+	"crypto/rsa"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -13,6 +12,7 @@ import (
 	"time"
 
 	"github.com/alexadamm/jwt-vault-go/pkg/jwks"
+	"github.com/alexadamm/jwt-vault-go/pkg/token/algorithms"
 	"github.com/alexadamm/jwt-vault-go/pkg/vault"
 )
 
@@ -31,24 +31,28 @@ type jwtVault struct {
 	vaultClient *vault.Client
 	jwksCache   *jwks.Cache
 	config      Config
+	algorithm   algorithms.Algorithm // Default algorithm
 }
 
 // New creates a new JWTVault instance
 func New(config Config) (JWTVault, error) {
-	// Apply defaults for unset values
-	if config.CacheTTL == 0 {
-		config.CacheTTL = DefaultConfig.CacheTTL
-	}
-	if config.RetryConfig == nil {
-		config.RetryConfig = DefaultConfig.RetryConfig
+	// Get the algorithm from config or default to ES256
+	alg := config.Algorithm
+	if alg == "" {
+		alg = "ES256"
 	}
 
-	// Initialize Vault client
+	algorithm, err := algorithms.Get(alg)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get algorithm: %w", err)
+	}
+
+	// Initialize Vault client with the algorithm
 	vaultClient, err := vault.NewClient(vault.Config{
 		Address:     config.VaultAddr,
 		Token:       config.VaultToken,
 		TransitPath: config.TransitKeyPath,
-	})
+	}, algorithm)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize vault client: %w", err)
 	}
@@ -64,12 +68,12 @@ func New(config Config) (JWTVault, error) {
 		vaultClient: vaultClient,
 		jwksCache:   jwksCache,
 		config:      config,
+		algorithm:   algorithm,
 	}, nil
 }
 
 // Sign creates a new JWT with the provided claims
 func (j *jwtVault) Sign(ctx context.Context, claims interface{}) (string, error) {
-	// Create the header
 	keyVersion, err := j.vaultClient.GetCurrentKeyVersion()
 	if err != nil {
 		return "", fmt.Errorf("failed to get key version: %w", err)
@@ -77,7 +81,7 @@ func (j *jwtVault) Sign(ctx context.Context, claims interface{}) (string, error)
 
 	header := map[string]interface{}{
 		"typ": "JWT",
-		"alg": "ES256",
+		"alg": j.algorithm.Name(),
 		"kid": fmt.Sprintf("%s:%d", j.config.TransitKeyPath, keyVersion),
 	}
 
@@ -98,47 +102,18 @@ func (j *jwtVault) Sign(ctx context.Context, claims interface{}) (string, error)
 	// Create signing input
 	signingInput := headerB64 + "." + claimsB64
 
-	// Sign the data
-	signatureDer, err := j.vaultClient.SignData(ctx, []byte(signingInput))
-
+	// Sign the data with Vault
+	signature, err := j.vaultClient.SignData(ctx, []byte(signingInput))
 	if err != nil {
 		return "", fmt.Errorf("failed to sign token: %w", err)
 	}
 
-	signatureRaw, err := convertDerToRawEcdsaSignature(signatureDer)
-	if err != nil {
-		return "", fmt.Errorf("error converting signature to raw: %v", err)
-	}
-	signatureB64 := base64.RawURLEncoding.EncodeToString(signatureRaw)
-
 	// Combine to form final token
-	return fmt.Sprintf("%s.%s.%s", headerB64, claimsB64, signatureB64), nil
+	return fmt.Sprintf("%s.%s.%s", headerB64, claimsB64, signature), nil
 }
 
 type ECDSASignature struct {
 	R, S *big.Int
-}
-
-// convertDerToRawEcdsaSignature converts a DER encoded ECDSA signature to a raw signature
-func convertDerToRawEcdsaSignature(signatureDer []byte) ([]byte, error) {
-	// convert der to raw ecdsa signature
-	var ecdsaSig ECDSASignature
-	if _, err := asn1.Unmarshal(signatureDer, &ecdsaSig); err != nil {
-		return nil, fmt.Errorf("error unmarshaling DER signature: %v", err)
-	}
-
-	rBytes := ecdsaSig.R.Bytes()
-	sBytes := ecdsaSig.S.Bytes()
-
-	// ensure r and s are 32 bytes each
-	rPadded := make([]byte, 32)
-	sPadded := make([]byte, 32)
-	copy(rPadded[32-len(rBytes):], rBytes)
-	copy(sPadded[32-len(sBytes):], sBytes)
-
-	signatureRaw := append(rPadded, sPadded...)
-
-	return signatureRaw, nil
 }
 
 // Verify validates a JWT and returns the verified token
@@ -165,22 +140,8 @@ func (j *jwtVault) Verify(ctx context.Context, tokenString string) (*VerifiedTok
 	}
 
 	// Validate header
-	if header.Typ != "JWT" || header.Alg != "ES256" {
+	if header.Typ != "JWT" {
 		return nil, ErrInvalidToken
-	}
-	if header.Kid == "" {
-		return nil, ErrMissingKID
-	}
-
-	// Get the public key
-	publicKey, err := j.jwksCache.GetKey(ctx, header.Kid)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get public key: %w", err)
-	}
-
-	// Verify signature
-	if err := verifySignature(parts, publicKey); err != nil {
-		return nil, err
 	}
 
 	// Parse and validate claims
@@ -195,10 +156,36 @@ func (j *jwtVault) Verify(ctx context.Context, tokenString string) (*VerifiedTok
 	}
 
 	// Validate expiry
-	if standardClaims.ExpiresAt != 0 {
-		if time.Unix(standardClaims.ExpiresAt, 0).Before(time.Now()) {
-			return nil, ErrTokenExpired
-		}
+	if err := validateClaims(&standardClaims); err != nil {
+		return nil, err
+	}
+
+	// Get the algorithm for verification
+	algorithm, err := algorithms.Get(header.Alg)
+	if err != nil {
+		return nil, fmt.Errorf("unsupported algorithm: %w", err)
+	}
+
+	if header.Kid == "" {
+		return nil, ErrMissingKID
+	}
+
+	// Get the public key
+	publicKey, err := j.jwksCache.GetKey(ctx, header.Kid)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get public key: %w", err)
+	}
+
+	// Decode signature
+	signature, err := base64.RawURLEncoding.DecodeString(parts[2])
+	if err != nil {
+		return nil, ErrInvalidSignature
+	}
+
+	// Verify signature
+	signingInput := parts[0] + "." + parts[1]
+	if err := algorithm.Verify([]byte(signingInput), signature, publicKey); err != nil {
+		return nil, err
 	}
 
 	// Parse custom claims if present
@@ -215,8 +202,25 @@ func (j *jwtVault) Verify(ctx context.Context, tokenString string) (*VerifiedTok
 }
 
 // GetPublicKey retrieves a public key for the given key ID
-func (j *jwtVault) GetPublicKey(ctx context.Context, kid string) (*ecdsa.PublicKey, error) {
-	return j.jwksCache.GetKey(ctx, kid)
+func (j *jwtVault) GetPublicKey(ctx context.Context, kid string) (interface{}, error) {
+	key, err := j.jwksCache.GetKey(ctx, kid)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get public key: %w", err)
+	}
+
+	// Validate key type matches the algorithm
+	switch j.algorithm.Name() {
+	case "ES256", "ES384", "ES512":
+		if _, ok := key.(*ecdsa.PublicKey); !ok {
+			return nil, fmt.Errorf("invalid key type: expected ECDSA, got %T", key)
+		}
+	case "RS256", "RS384", "RS512", "PS256", "PS384", "PS512":
+		if _, ok := key.(*rsa.PublicKey); !ok {
+			return nil, fmt.Errorf("invalid key type: expected RSA, got %T", key)
+		}
+	}
+
+	return key, nil
 }
 
 // RotateKey triggers a rotation of the signing key
@@ -245,32 +249,4 @@ func (j *jwtVault) Health(ctx context.Context) (*HealthStatus, error) {
 			"currentKeyVersion": version,
 		},
 	}, nil
-}
-
-// verifySignature verifies the ECDSA signature of a JWT
-func verifySignature(parts []string, publicKey *ecdsa.PublicKey) error {
-	// Decode signature
-	signature, err := base64.RawURLEncoding.DecodeString(parts[2])
-	if err != nil {
-		return ErrInvalidSignature
-	}
-
-	// Split signature into r and s
-	if len(signature) != 64 {
-		return ErrInvalidSignature
-	}
-
-	r := new(big.Int).SetBytes(signature[:32])
-	s := new(big.Int).SetBytes(signature[32:])
-
-	// Create hash of the signing input
-	signingInput := parts[0] + "." + parts[1]
-	hash := sha256.Sum256([]byte(signingInput))
-
-	// Verify signature
-	if !ecdsa.Verify(publicKey, hash[:], r, s) {
-		return ErrInvalidSignature
-	}
-
-	return nil
 }

@@ -4,22 +4,35 @@
 *.dll
 *.so
 *.dylib
+jwt-vault-go
 
 # Test binary, built with `go test -c`
 *.test
 
 # Output of the go coverage tool
 *.out
+coverage.txt
+coverage.html
 
 # Go workspace file
 go.work
 
 # IDE specific files
-.idea
-.vscode
+.idea/
+.vscode/
 *.swp
 *.swo
+*~
 
 # OS specific files
 .DS_Store
+Thumbs.db
+
+# Environment files
 .env
+.env.local
+
+# Temporary files
+tmp/
+temp/
+*.tmp

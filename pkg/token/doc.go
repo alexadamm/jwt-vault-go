@@ -9,25 +9,42 @@ Basic usage:
 	    VaultAddr:      "http://localhost:8200",
 	    VaultToken:     "your-token",
 	    TransitKeyPath: "jwt-key",
+	    Algorithm:      "ES256", // Supports ES256, ES384, ES512, RS256, RS384, RS512, PS256, PS384, PS512
 	})
 
 	if err != nil {
 	    log.Fatal(err)
 	}
 
-// Create and sign a token
-
+	// Create and sign a token
 	claims := map[string]interface{}{
 	    "sub": "1234567890",
 	    "name": "John Doe",
 	}
 
-token, err := jv.Sign(context.Background(), claims)
+	token, err := jv.Sign(context.Background(), claims)
 
-// Verify a token
-verified, err := jv.Verify(context.Background(), token)
+	// Verify a token
+	verified, err := jv.Verify(context.Background(), token)
+
 ```
-The package supports custom claims through struct embedding:
+
+Algorithm Support:
+- ECDSA: ES256 (P-256), ES384 (P-384), ES512 (P-521)
+- RSA: RS256, RS384, RS512 (PKCS1v15 padding)
+- RSA-PSS: PS256, PS384, PS512
+
+Vault Configuration:
+The library uses Vault's Transit engine with JWS marshaling for signatures.
+Required Vault key types:
+- For ES256: ecdsa-p256
+- For ES384: ecdsa-p384
+- For ES512: ecdsa-p521
+- For RS256/PS256: rsa-2048
+- For RS384/PS384: rsa-3072
+- For RS512/PS512: rsa-4096
+
+Custom Claims Example:
 ```
 
 	type CustomClaims struct {
@@ -37,14 +54,36 @@ The package supports custom claims through struct embedding:
 	    Roles    []string `json:"roles"`
 	}
 
+	claims := CustomClaims{
+	    StandardClaims: token.StandardClaims{
+	        Issuer:    "my-app",
+	        Subject:   "user-123",
+	        IssuedAt:  time.Now().Unix(),
+	        ExpiresAt: time.Now().Add(24 * time.Hour).Unix(),
+	    },
+	    UserID:   "user-123",
+	    Username: "johndoe",
+	    Roles:    []string{"user", "admin"},
+	}
+
 ```
-Key rotation is supported through the RotateKey method:
+
+Key Rotation:
 ```
-err := jv.RotateKey(context.Background())
+
+	// Rotate the signing key
+	err := jv.RotateKey(context.Background())
+
+	// Old tokens will still be valid after rotation
+	// New tokens will use the new key version
+
 ```
-Health checking is also supported:
+
+Health Checking:
 ```
-health, err := jv.Health(context.Background())
+
+	health, err := jv.Health(context.Background())
+
 ```
 */
 package token

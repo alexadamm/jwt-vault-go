@@ -4,7 +4,8 @@ JWT-Vault-Go is a Go library that provides seamless integration between JWT (JSO
 
 ## Features
 
-- JWT signing using Vault's Transit engine (ES256)
+- Multiple algorithm support (ECDSA, RSA, RSA-PSS)
+- JWS signature format
 - Automatic JWKS caching and rotation
 - Thread-safe operations
 - Built-in token validation
@@ -20,7 +21,7 @@ go get github.com/alexadamm/jwt-vault-go
 
 ## Quick Start
 
-```
+```go
 package main
 
 import (
@@ -38,6 +39,7 @@ func main() {
         VaultAddr:      "http://localhost:8200",
         VaultToken:     "your-token",
         TransitKeyPath: "jwt-key",
+        Algorithm:      "ES256",  // Select your preferred algorithm
     })
     if err != nil {
         log.Fatal(err)
@@ -66,11 +68,25 @@ func main() {
 }
 ```
 
+## Supported Algorithms
+
+| JWT Algorithm | Vault Key Type | Notes |
+|--------------|---------------|-------|
+| ES256        | ecdsa-p256    | ECDSA with P-256 curve |
+| ES384        | ecdsa-p384    | ECDSA with P-384 curve |
+| ES512        | ecdsa-p521    | ECDSA with P-521 curve |
+| RS256        | rsa-2048      | RSA with PKCS1v15 padding |
+| RS384        | rsa-3072      | RSA with PKCS1v15 padding |
+| RS512        | rsa-4096      | RSA with PKCS1v15 padding |
+| PS256        | rsa-2048      | RSA with PSS padding |
+| PS384        | rsa-3072      | RSA with PSS padding |
+| PS512        | rsa-4096      | RSA with PSS padding |
+
 ## Prerequisites
 1. HashiCorp Vault server with Transit engine enabled
-2. Transit key configured for ECDSA (ES256)
+2. Transit key configured for your chosen algorithm
 
-```
+```bash
 # Start Vault dev server (for testing)
 vault server -dev
 
@@ -81,12 +97,18 @@ export VAULT_TOKEN='dev-token'
 # Enable transit engine
 vault secrets enable transit
 
-# Create signing key
+# Create key for ES256
 vault write -f transit/keys/jwt-key type=ecdsa-p256
+
+# Or for RS256
+vault write -f transit/keys/jwt-key type=rsa-2048
+
+# Or for PS256
+vault write -f transit/keys/jwt-key type=rsa-2048
 ```
 
 ## Configuration
-```
+```go
 type Config struct {
     // VaultAddr is the address of the Vault server
     VaultAddr string
@@ -96,6 +118,9 @@ type Config struct {
 
     // TransitKeyPath is the path to the transit key in Vault
     TransitKeyPath string
+
+    // Algorithm specifies the signing algorithm (e.g., "ES256", "RS256", "PS256")
+    Algorithm string
 
     // CacheTTL is the TTL for the JWKS cache (default: 5m)
     CacheTTL time.Duration
@@ -108,44 +133,16 @@ type Config struct {
 }
 ```
 
-## Custom Claims
-```
-type CustomClaims struct {
-    token.StandardClaims
-    UserID   string   `json:"user_id"`
-    Username string   `json:"username"`
-    Roles    []string `json:"roles"`
-}
-
-claims := CustomClaims{
-    StandardClaims: token.StandardClaims{
-        Issuer:    "my-app",
-        Subject:   "user-123",
-        IssuedAt:  time.Now().Unix(),
-        ExpiresAt: time.Now().Add(24 * time.Hour).Unix(),
-    },
-    UserID:   "user-123",
-    Username: "johndoe",
-    Roles:    []string{"user", "admin"},
-}
-```
-
 ## Key Rotation
 JWT-Vault-Go supports automatic key rotation through Vault's Transit engine:
-```
+```go
 // Rotate the signing key
 err := jv.RotateKey(context.Background())
-if err != nil {
-    log.Fatal(err)
-}
 ```
 
 ## Health Checking
-```
+```go
 health, err := jv.Health(context.Background())
-if err != nil {
-    log.Fatal(err)
-}
 fmt.Printf("Health Status: %v\n", health.Message)
 ```
 

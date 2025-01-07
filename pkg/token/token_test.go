@@ -5,6 +5,10 @@ import (
 	"time"
 )
 
+// TestConfig verifies configuration validation:
+// - Required fields (VaultAddr, VaultToken)
+// - Default values (Algorithm = ES256)
+// - TTL settings for cache
 func TestConfig(t *testing.T) {
 	cfg := Config{
 		VaultAddr:      "http://localhost:8200",
@@ -31,6 +35,10 @@ func TestConfig(t *testing.T) {
 	}
 }
 
+// TestStandardClaims verifies standard claims handling:
+// - Issuer, Subject, Audience fields
+// - Time validation (exp, nbf, iat)
+// - JSON marshaling/unmarshaling
 func TestStandardClaims(t *testing.T) {
 	claims := &StandardClaims{
 		Issuer:    "test-issuer",
