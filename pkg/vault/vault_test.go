@@ -4,6 +4,8 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"crypto/rsa"
+	"encoding/base64"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -48,7 +50,7 @@ func TestVaultClient(t *testing.T) {
 		{
 			name:        "RSA 4096 PSS",
 			algorithm:   "PS512",
-			keyType:     "rsa-4096-pss",
+			keyType:     "rsa-4096",
 			transitPath: "jwt-test-ps512",
 			wantKeyType: &rsa.PublicKey{},
 		},
@@ -63,7 +65,7 @@ func TestVaultClient(t *testing.T) {
 			}
 
 			// Create test key if it doesn't exist
-			setupTestKey(t, config)
+			setupTestKey(t, config, tc.keyType)
 
 			// Get algorithm
 			algorithm, err := algorithms.Get(tc.algorithm)
@@ -113,10 +115,9 @@ func TestVaultClient(t *testing.T) {
 					t.Errorf("Failed to sign data: %v", err)
 				}
 
-				// Verify signature format
-				parts := strings.Split(signature, ":")
-				if len(parts) != 3 {
-					t.Error("Invalid signature format")
+				// Should be base64url encoded
+				if _, err := base64.RawURLEncoding.DecodeString(signature); err != nil {
+					t.Errorf("Invalid base64url signature: %v", err)
 				}
 			})
 
@@ -135,7 +136,7 @@ func TestVaultClient(t *testing.T) {
 	}
 }
 
-func setupTestKey(t *testing.T, config Config) {
+func setupTestKey(t *testing.T, config Config, keyType string) {
 	client, err := api.NewClient(&api.Config{
 		Address: config.Address,
 	})
@@ -153,5 +154,14 @@ func setupTestKey(t *testing.T, config Config) {
 		if !strings.Contains(err.Error(), "path is already in use") {
 			t.Fatalf("Failed to mount transit engine: %v", err)
 		}
+	}
+
+	// Create key if it doesn't exist
+	path := fmt.Sprintf("transit/keys/%s", config.TransitPath)
+	_, err = client.Logical().Write(path, map[string]interface{}{
+		"type": keyType,
+	})
+	if err != nil {
+		t.Fatalf("Failed to create test key: %v", err)
 	}
 }
