@@ -23,15 +23,20 @@ type Algorithm interface {
 	Hash() crypto.Hash
 
 	// VaultKeyType returns the required Vault Transit key type
+	// Examples: "ecdsa-p256", "rsa-2048"
 	VaultKeyType() string
 
 	// SigningParams returns algorithm-specific Vault signing parameters
+	// Including base params (prehashed, hash_algorithm) and algorithm specific ones
+	// All algorithms use marshaling_algorithm=jws
 	SigningParams() map[string]interface{}
 
-	// Verify verifies the signature against the message
+	// Verify verifies the signature against the message using given public key
+	// Key must be *ecdsa.PublicKey or *rsa.PublicKey matching the algorithm
 	Verify(message, signature []byte, key interface{}) error
 
 	// KeyCheck validates the key type for verification
+	// Returns ErrInvalidKeyType if key type doesn't match algorithm
 	KeyCheck(key interface{}) error
 }
 

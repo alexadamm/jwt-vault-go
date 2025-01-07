@@ -33,13 +33,15 @@ type Client struct {
 
 // Config holds configuration for the Vault client
 type Config struct {
-	// Address is the Vault server address
+	// Address is the Vault server address (e.g., "http://localhost:8200")
 	Address string
 
 	// Token is the authentication token
+	// Must have permissions for transit engine operations
 	Token string
 
-	// TransitPath is the path to the transit key
+	// TransitKeyPath is the path to the transit key
+	// Example: "jwt-key" for key at transit/keys/jwt-key
 	TransitPath string
 }
 
@@ -150,6 +152,8 @@ func (c *Client) GetCurrentKeyVersion() (int64, error) {
 }
 
 // GetPublicKey retrieves a public key for a specific version
+// Version should be a string representing key version (e.g., "1")
+// Returns *ecdsa.PublicKey or *rsa.PublicKey based on key type
 func (c *Client) GetPublicKey(ctx context.Context, version string) (interface{}, error) {
 	path := fmt.Sprintf("transit/keys/%s", c.transitPath)
 
@@ -238,6 +242,8 @@ func (c *Client) SignData(ctx context.Context, data []byte) (string, error) {
 }
 
 // RotateKey triggers a key rotation in the transit engine
+// Creates a new version of the key while maintaining old versions
+// Updates c.keyVersion to the new version number
 func (c *Client) RotateKey(ctx context.Context) error {
 	path := fmt.Sprintf("transit/keys/%s/rotate", c.transitPath)
 

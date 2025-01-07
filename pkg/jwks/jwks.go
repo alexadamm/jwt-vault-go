@@ -11,14 +11,17 @@ import (
 )
 
 // KeyType represents the type of cryptographic key
+// Used to identify the key type when retrieving from cache
 type KeyType int
 
 const (
-	KeyTypeECDSA KeyType = iota
-	KeyTypeRSA
+	KeyTypeECDSA KeyType = iota // ECDSA public keys (P-256, P-384, P-521)
+	KeyTypeRSA                  // RSA public keys (2048, 3072, 4096 bits)
 )
 
 // Cache represents a thread-safe cache for JWKS
+// Provides caching and retrieval of public keys from Vault
+// with automatic expiration and cleanup
 type Cache struct {
 	sync.RWMutex
 	keys     map[string]*cachedKey

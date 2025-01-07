@@ -181,6 +181,13 @@ func TestJWTVault(t *testing.T) {
 	}
 }
 
+// setupVaultForTest initializes Vault for integration tests:
+// - Ensures transit engine is mounted
+// - Creates required test keys
+// - Sets up proper permissions
+// Required environment variables:
+// - VAULT_ADDR: Address of Vault server
+// - VAULT_TOKEN: Token with transit permissions
 func setupVaultForTest(t *testing.T) {
 	client, err := api.NewClient(&api.Config{
 		Address: os.Getenv("VAULT_ADDR"),
@@ -202,6 +209,11 @@ func setupVaultForTest(t *testing.T) {
 	}
 }
 
+// createTransitKey creates a transit key in Vault
+// Parameters:
+// - transitPath: Key path in transit engine
+// - keyType: Vault key type (e.g., "ecdsa-p256", "rsa-2048")
+// Handles "already exists" errors appropriately
 func createTransitKey(t *testing.T, transitPath, keyType string) {
 	client, err := api.NewClient(&api.Config{
 		Address: os.Getenv("VAULT_ADDR"),
@@ -220,6 +232,11 @@ func createTransitKey(t *testing.T, transitPath, keyType string) {
 	}
 }
 
+// getKeyTypeForAlg maps JWT algorithm names to Vault key types
+// Returns appropriate key type for each supported algorithm:
+// - ES256 -> ecdsa-p256
+// - RS256/PS256 -> rsa-2048
+// Used for test setup and validation
 func getKeyTypeForAlg(alg string) string {
 	switch alg {
 	case "ES256":

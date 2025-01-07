@@ -11,6 +11,12 @@ import (
 	"time"
 )
 
+// TestCache verifies JWKS caching functionality:
+// - Key retrieval and caching
+// - Type identification (ECDSA vs RSA)
+// - Cache expiration and cleanup
+// - Error handling for invalid keys
+// No Vault instance required - uses mock keys
 func TestCache(t *testing.T) {
 	// Generate test keys
 	ecKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
@@ -132,6 +138,10 @@ func TestCache(t *testing.T) {
 	})
 }
 
+// TestKeyTypeDetection verifies key type detection:
+// - ECDSA key detection with different curves
+// - RSA key detection with different sizes
+// - Error handling for unsupported key types
 func TestKeyTypeDetection(t *testing.T) {
 	ecKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	rsaKey, _ := rsa.GenerateKey(rand.Reader, 2048)
