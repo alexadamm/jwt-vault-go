@@ -17,6 +17,11 @@ import (
 )
 
 // Client wraps HashiCorp Vault's Transit engine client
+// Handles:
+// - Signing operations with JWS format
+// - Public key retrieval
+// - Key version management
+// - Key rotation
 type Client struct {
 	client      *api.Client
 	transitPath string
@@ -194,7 +199,9 @@ func (c *Client) GetPublicKey(ctx context.Context, version string) (interface{},
 	return pub, nil
 }
 
-// SignData signs data using the transit engine
+// SignData signs data using the transit engine with algorithm-specific params
+// Returns the signature in JWS format (base64url encoded)
+// Uses marshaling_algorithm=jws for consistent JWT format
 func (c *Client) SignData(ctx context.Context, data []byte) (string, error) {
 	// Hash the input data first
 	hash := c.hash.New()

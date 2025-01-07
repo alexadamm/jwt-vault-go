@@ -8,6 +8,11 @@ import (
 	"testing"
 )
 
+// TestRSAAlgorithm verifies RSA algorithm implementations:
+// - PKCS1v15 and PSS padding
+// - Different key sizes (2048, 3072, 4096)
+// - Salt length handling for PSS
+// - JWS format signatures
 func TestRSAAlgorithm(t *testing.T) {
 	algorithms := []struct {
 		name    string

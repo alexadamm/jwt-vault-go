@@ -21,6 +21,11 @@ const (
 )
 
 // NewRSAAlgorithm creates a new RSA algorithm instance
+// Supports both PKCS1v15 (RS*) and PSS (PS*) padding
+// Required Vault key types based on hash size:
+// - SHA-256: rsa-2048
+// - SHA-384: rsa-3072
+// - SHA-512: rsa-4096
 func NewRSAAlgorithm(name string, hash crypto.Hash, pad padding) Algorithm {
 	var vaultType string
 	// Map RSA key size based on hash size

@@ -8,6 +8,11 @@ import (
 	"testing"
 )
 
+// TestECDSAAlgorithm verifies ECDSA algorithm implementation:
+// - Signature verification for each curve
+// - JWS marshaling format
+// - Invalid signature handling
+// - Key type validation
 func TestECDSAAlgorithm(t *testing.T) {
 	alg := NewECDSAAlgorithm("ES256", crypto.SHA256, p256)
 

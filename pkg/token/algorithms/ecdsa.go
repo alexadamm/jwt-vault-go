@@ -12,7 +12,7 @@ type ECDSASignature struct {
 	R, S *big.Int
 }
 
-// ECDSAAlgorithm implements the Algorithm interface for ECDSA signatures
+// NewECDSAAlgorithm creates a new ECDSA algorithm instance
 type ECDSAAlgorithm struct {
 	BaseAlgorithm
 	curve ellipticCurve
@@ -32,6 +32,11 @@ var (
 )
 
 // NewECDSAAlgorithm creates a new ECDSA algorithm instance
+// Supported names: ES256, ES384, ES512
+// Each algorithm requires the corresponding Vault key type:
+// - ES256: ecdsa-p256
+// - ES384: ecdsa-p384
+// - ES512: ecdsa-p521
 func NewECDSAAlgorithm(name string, hash crypto.Hash, curve ellipticCurve) Algorithm {
 	return &ECDSAAlgorithm{
 		BaseAlgorithm: BaseAlgorithm{

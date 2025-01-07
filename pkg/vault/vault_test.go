@@ -14,6 +14,12 @@ import (
 	"github.com/hashicorp/vault/api"
 )
 
+// TestVaultClient verifies Vault client operations:
+// - Transit key management
+// - Signing with JWS format
+// - Public key retrieval
+// - Multiple algorithm support
+// Requires Vault setup as described in jwt_test.go
 func TestVaultClient(t *testing.T) {
 	if os.Getenv("VAULT_ADDR") == "" {
 		t.Skip("Skipping vault integration test (VAULT_ADDR not set)")

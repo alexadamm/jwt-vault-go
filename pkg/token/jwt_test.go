@@ -18,6 +18,17 @@ type TestClaims struct {
 	Role string `json:"role"`
 }
 
+// TestJWTVault tests the full JWT lifecycle for each supported algorithm
+// Requires a running Vault instance with:
+// - Transit engine enabled
+// - Test keys created:
+//   - jwt-test-es256 (type: ecdsa-p256)
+//   - jwt-test-rs256 (type: rsa-2048)
+//   - jwt-test-ps256 (type: rsa-2048)
+//
+// Environment variables:
+// - VAULT_ADDR: Vault server address
+// - VAULT_TOKEN: Token with transit engine permissions
 func TestJWTVault(t *testing.T) {
 	if os.Getenv("VAULT_ADDR") == "" || os.Getenv("VAULT_TOKEN") == "" {
 		t.Skip("Skipping vault integration test (VAULT_ADDR or VAULT_TOKEN not set)")
