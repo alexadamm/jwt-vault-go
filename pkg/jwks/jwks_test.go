@@ -7,6 +7,8 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"errors"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -183,5 +185,58 @@ func TestKeyTypeDetection(t *testing.T) {
 				t.Errorf("determineKeyType() = %v, want %v", gotType, tt.wantType)
 			}
 		})
+	}
+}
+
+func TestCacheConcurrency(t *testing.T) {
+	// Generate test keys
+	ecKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("Failed to generate ECDSA key: %v", err)
+	}
+
+	fetchCount := 0
+	var fetchMutex sync.Mutex
+	mockFetch := func(ctx context.Context, version string) (interface{}, error) {
+		fetchMutex.Lock()
+		fetchCount++
+		fetchMutex.Unlock()
+		return &ecKey.PublicKey, nil
+	}
+
+	cache := NewCache(Config{
+		MaxAge:          100 * time.Millisecond,
+		CleanupInterval: 50 * time.Millisecond,
+		KeyFetchFunc:    mockFetch,
+	})
+
+	// Test concurrent access
+	const numGoroutines = 10
+	const numRequests = 100
+	var wg sync.WaitGroup
+	wg.Add(numGoroutines)
+
+	for i := 0; i < numGoroutines; i++ {
+		go func() {
+			defer wg.Done()
+			for j := 0; j < numRequests; j++ {
+				key, err := cache.GetKey(context.Background(), "test-key:1")
+				if err != nil {
+					t.Errorf("GetKey failed: %v", err)
+				}
+				if key == nil {
+					t.Error("Expected key, got nil")
+				}
+				time.Sleep(time.Millisecond) // Simulate some work
+			}
+		}()
+	}
+
+	wg.Wait()
+
+	// Should have far fewer fetches than requests due to caching
+	if fetchCount >= numGoroutines*numRequests {
+		t.Errorf("Expected caching to reduce fetch count, got %d fetches for %d requests",
+			fetchCount, numGoroutines*numRequests)
 	}
 }
