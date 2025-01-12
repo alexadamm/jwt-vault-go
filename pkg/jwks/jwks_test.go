@@ -270,22 +270,28 @@ func TestCacheEviction(t *testing.T) {
 		return fetchCount[version]
 	}
 
-	t.Run("cache hit", func(t *testing.T) {
-		// First fetch
-		key, err := cache.GetKey(context.Background(), "key1:1")
+	validateKey := func(t *testing.T, key interface{}, err error) {
+		t.Helper()
 		if err != nil {
-			t.Fatalf("First GetKey failed: %v", err)
+			t.Fatalf("GetKey failed: %v", err)
 		}
 		if key == nil {
 			t.Fatal("Expected key, got nil")
 		}
+		if _, ok := key.(*ecdsa.PublicKey); !ok {
+			t.Fatal("Expected ECDSA public key")
+		}
+	}
+
+	t.Run("cache hit", func(t *testing.T) {
+		// First fetch
+		key, err := cache.GetKey(context.Background(), "key1:1")
+		validateKey(t, key, err)
 		initialCount := getFetchCount("1")
 
 		// Immediate second fetch - should hit cache
 		key, err = cache.GetKey(context.Background(), "key1:1")
-		if err != nil {
-			t.Fatalf("Second GetKey failed: %v", err)
-		}
+		validateKey(t, key, err)
 		if getFetchCount("1") != initialCount {
 			t.Error("Expected cache hit, got cache miss")
 		}
@@ -293,20 +299,16 @@ func TestCacheEviction(t *testing.T) {
 
 	t.Run("cache expiry", func(t *testing.T) {
 		// First fetch
-		_, err := cache.GetKey(context.Background(), "key2:1")
-		if err != nil {
-			t.Fatalf("First GetKey failed: %v", err)
-		}
+		key, err := cache.GetKey(context.Background(), "key2:1")
+		validateKey(t, key, err)
 		initialCount := getFetchCount("1")
 
 		// Wait for cache to expire
 		time.Sleep(maxAge * 2)
 
 		// Second fetch - should miss cache
-		_, err = cache.GetKey(context.Background(), "key2:1")
-		if err != nil {
-			t.Fatalf("Second GetKey failed: %v", err)
-		}
+		key, err = cache.GetKey(context.Background(), "key2:1")
+		validateKey(t, key, err)
 		if getFetchCount("1") <= initialCount {
 			t.Error("Expected cache miss after expiry")
 		}
@@ -318,12 +320,7 @@ func TestCacheEviction(t *testing.T) {
 		// Fetch different keys
 		for _, kid := range []string{"key3:1", "key4:1"} {
 			key, err := cache.GetKey(context.Background(), kid)
-			if err != nil {
-				t.Fatalf("GetKey failed for %s: %v", kid, err)
-			}
-			if key == nil {
-				t.Fatalf("Expected key for %s, got nil", kid)
-			}
+			validateKey(t, key, err)
 		}
 
 		if getFetchCount("1") != initialCount+2 {
