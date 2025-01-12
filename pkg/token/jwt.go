@@ -28,7 +28,7 @@ var DefaultConfig = Config{
 
 // jwtVault implements the JWTVault interface
 type jwtVault struct {
-	vaultClient *vault.Client
+	vaultClient VaultClient
 	jwksCache   *jwks.Cache
 	config      Config
 	algorithm   algorithms.Algorithm // Default algorithm

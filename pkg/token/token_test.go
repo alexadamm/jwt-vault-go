@@ -1,6 +1,8 @@
 package token
 
 import (
+	"context"
+	"fmt"
 	"testing"
 	"time"
 )
@@ -135,4 +137,134 @@ func TestValidateClaims(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestJWTVault_Health(t *testing.T) {
+    tests := []struct {
+        name          string
+        setupMock     func() (*jwtVault, *mockVaultClient)
+        checkResponse func(*testing.T, *HealthStatus, error)
+    }{
+        {
+            name: "healthy status",
+            setupMock: func() (*jwtVault, *mockVaultClient) {
+                mock := &mockVaultClient{
+                    getCurrentKeyVersionFunc: func() (int64, error) {
+                        return 1, nil
+                    },
+                }
+                jv := &jwtVault{
+                    vaultClient: mock,
+                }
+                return jv, mock
+            },
+            checkResponse: func(t *testing.T, status *HealthStatus, err error) {
+                if err != nil {
+                    t.Errorf("unexpected error: %v", err)
+                }
+                if status == nil {
+                    t.Fatal("expected health status, got nil")
+                }
+                if !status.Healthy {
+                    t.Error("expected healthy status")
+                }
+                if status.Message != "Service is healthy" {
+                    t.Errorf("unexpected message: %s", status.Message)
+                }
+                if version, ok := status.Details["currentKeyVersion"].(int64); !ok || version != 1 {
+                    t.Errorf("unexpected version in details: %v", status.Details["currentKeyVersion"])
+                }
+            },
+        },
+        {
+            name: "unhealthy when key version check fails",
+            setupMock: func() (*jwtVault, *mockVaultClient) {
+                mock := &mockVaultClient{
+                    getCurrentKeyVersionFunc: func() (int64, error) {
+                        return 0, fmt.Errorf("vault unreachable")
+                    },
+                }
+                jv := &jwtVault{
+                    vaultClient: mock,
+                }
+                return jv, mock
+            },
+            checkResponse: func(t *testing.T, status *HealthStatus, err error) {
+                if err != nil {
+                    t.Errorf("unexpected error: %v", err)
+                }
+                if status == nil {
+                    t.Fatal("expected health status, got nil")
+                }
+                if status.Healthy {
+                    t.Error("expected unhealthy status")
+                }
+                if status.Message != "Failed to get key version" {
+                    t.Errorf("unexpected message: %s", status.Message)
+                }
+                errDetails, ok := status.Details["error"].(string)
+                if !ok || errDetails != "vault unreachable" {
+                    t.Errorf("unexpected error details: %v", status.Details["error"])
+                }
+            },
+        },
+        {
+            name: "handles zero key version",
+            setupMock: func() (*jwtVault, *mockVaultClient) {
+                mock := &mockVaultClient{
+                    getCurrentKeyVersionFunc: func() (int64, error) {
+                        return 0, nil
+                    },
+                }
+                jv := &jwtVault{
+                    vaultClient: mock,
+                }
+                return jv, mock
+            },
+            checkResponse: func(t *testing.T, status *HealthStatus, err error) {
+                if err != nil {
+                    t.Errorf("unexpected error: %v", err)
+                }
+                if status == nil {
+                    t.Fatal("expected health status, got nil")
+                }
+                if !status.Healthy {
+                    t.Error("expected healthy status despite zero version")
+                }
+                if version, ok := status.Details["currentKeyVersion"].(int64); !ok || version != 0 {
+                    t.Errorf("unexpected version in details: %v", status.Details["currentKeyVersion"])
+                }
+            },
+        },
+    }
+
+    for _, tt := range tests {
+        t.Run(tt.name, func(t *testing.T) {
+            jv, _ := tt.setupMock()
+            status, err := jv.Health(context.Background())
+            tt.checkResponse(t, status, err)
+        })
+    }
+}
+
+// mockVaultClient implements a mock for testing
+type mockVaultClient struct {
+    getCurrentKeyVersionFunc func() (int64, error)
+}
+
+func (m *mockVaultClient) GetCurrentKeyVersion() (int64, error) {
+    return m.getCurrentKeyVersionFunc()
+}
+
+// Add stubs for other interface methods
+func (m *mockVaultClient) GetPublicKey(ctx context.Context, version string) (interface{}, error) {
+    return nil, nil
+}
+
+func (m *mockVaultClient) SignData(ctx context.Context, data []byte) (string, error) {
+    return "", nil
+}
+
+func (m *mockVaultClient) RotateKey(ctx context.Context) error {
+    return nil
 }
