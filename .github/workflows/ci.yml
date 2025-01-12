@@ -60,7 +60,11 @@ jobs:
         VAULT_TOKEN: dev-token
 
     - name: Run tests
-      run: go test -v -race -coverprofile=coverage.txt -covermode=atomic ./...
+      run: |
+        # Run all tests including examples to ensure they compile
+        go test -v -race ./...
+        # Run coverage only on pkg directory
+        go test -v -race -coverprofile=coverage.txt -covermode=atomic ./pkg/.
       env:
         VAULT_ADDR: 'http://localhost:8200'
         VAULT_TOKEN: 'dev-token'
