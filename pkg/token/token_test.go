@@ -57,3 +57,82 @@ func TestStandardClaims(t *testing.T) {
 		t.Error("ExpiresAt should be after IssuedAt")
 	}
 }
+
+func TestValidateClaims(t *testing.T) {
+	now := time.Now()
+
+	tests := []struct {
+		name    string
+		claims  *StandardClaims
+		wantErr error
+	}{
+		{
+			name: "valid claims",
+			claims: &StandardClaims{
+				ExpiresAt: now.Add(1 * time.Hour).Unix(),
+				NotBefore: now.Add(-1 * time.Hour).Unix(),
+				IssuedAt:  now.Add(-1 * time.Hour).Unix(),
+			},
+			wantErr: nil,
+		},
+		{
+			name: "expired token",
+			claims: &StandardClaims{
+				ExpiresAt: now.Add(-1 * time.Hour).Unix(),
+			},
+			wantErr: ErrTokenExpired,
+		},
+		{
+			name: "not yet valid",
+			claims: &StandardClaims{
+				NotBefore: now.Add(1 * time.Hour).Unix(),
+			},
+			wantErr: ErrTokenNotValidYet,
+		},
+		{
+			name: "used before issued",
+			claims: &StandardClaims{
+				IssuedAt: now.Add(1 * time.Hour).Unix(),
+			},
+			wantErr: ErrTokenUsedBeforeIssued,
+		},
+		{
+			name:    "zero values - should be valid",
+			claims:  &StandardClaims{},
+			wantErr: nil,
+		},
+		{
+			name: "all time claims at current time",
+			claims: &StandardClaims{
+				ExpiresAt: now.Unix(),
+				NotBefore: now.Unix(),
+				IssuedAt:  now.Unix(),
+			},
+			wantErr: ErrTokenExpired,
+		},
+		{
+			name: "extreme future expiry",
+			claims: &StandardClaims{
+				ExpiresAt: now.Add(87600 * time.Hour).Unix(), // 10 years
+			},
+			wantErr: nil,
+		},
+		{
+			name: "extreme past issuance",
+			claims: &StandardClaims{
+				IssuedAt:  now.Add(-87600 * time.Hour).Unix(), // 10 years ago
+				ExpiresAt: now.Add(1 * time.Hour).Unix(),      // but still valid
+			},
+			wantErr: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateClaims(tt.claims)
+			if err != tt.wantErr {
+				t.Errorf("validateClaims() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
