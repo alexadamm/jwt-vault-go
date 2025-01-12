@@ -240,3 +240,94 @@ func TestCacheConcurrency(t *testing.T) {
 			fetchCount, numGoroutines*numRequests)
 	}
 }
+
+func TestCacheEviction(t *testing.T) {
+	ecKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("Failed to generate ECDSA key: %v", err)
+	}
+
+	fetchCount := make(map[string]int)
+	var fetchMutex sync.Mutex
+	mockFetch := func(ctx context.Context, version string) (interface{}, error) {
+		fetchMutex.Lock()
+		defer fetchMutex.Unlock()
+		fetchCount[version]++
+		return &ecKey.PublicKey, nil
+	}
+
+	// Use longer durations to avoid flaky tests
+	maxAge := 200 * time.Millisecond
+	cache := NewCache(Config{
+		MaxAge:          maxAge,
+		CleanupInterval: maxAge / 2,
+		KeyFetchFunc:    mockFetch,
+	})
+
+	getFetchCount := func(version string) int {
+		fetchMutex.Lock()
+		defer fetchMutex.Unlock()
+		return fetchCount[version]
+	}
+
+	t.Run("cache hit", func(t *testing.T) {
+		// First fetch
+		key, err := cache.GetKey(context.Background(), "key1:1")
+		if err != nil {
+			t.Fatalf("First GetKey failed: %v", err)
+		}
+		if key == nil {
+			t.Fatal("Expected key, got nil")
+		}
+		initialCount := getFetchCount("1")
+
+		// Immediate second fetch - should hit cache
+		key, err = cache.GetKey(context.Background(), "key1:1")
+		if err != nil {
+			t.Fatalf("Second GetKey failed: %v", err)
+		}
+		if getFetchCount("1") != initialCount {
+			t.Error("Expected cache hit, got cache miss")
+		}
+	})
+
+	t.Run("cache expiry", func(t *testing.T) {
+		// First fetch
+		_, err := cache.GetKey(context.Background(), "key2:1")
+		if err != nil {
+			t.Fatalf("First GetKey failed: %v", err)
+		}
+		initialCount := getFetchCount("1")
+
+		// Wait for cache to expire
+		time.Sleep(maxAge * 2)
+
+		// Second fetch - should miss cache
+		_, err = cache.GetKey(context.Background(), "key2:1")
+		if err != nil {
+			t.Fatalf("Second GetKey failed: %v", err)
+		}
+		if getFetchCount("1") <= initialCount {
+			t.Error("Expected cache miss after expiry")
+		}
+	})
+
+	t.Run("different keys", func(t *testing.T) {
+		initialCount := getFetchCount("1")
+
+		// Fetch different keys
+		for _, kid := range []string{"key3:1", "key4:1"} {
+			key, err := cache.GetKey(context.Background(), kid)
+			if err != nil {
+				t.Fatalf("GetKey failed for %s: %v", kid, err)
+			}
+			if key == nil {
+				t.Fatalf("Expected key for %s, got nil", kid)
+			}
+		}
+
+		if getFetchCount("1") != initialCount+2 {
+			t.Error("Expected separate cache entries for different keys")
+		}
+	})
+}
