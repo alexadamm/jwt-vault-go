@@ -331,3 +331,83 @@ func TestCacheEviction(t *testing.T) {
 		}
 	})
 }
+
+func TestCacheErrorHandling(t *testing.T) {
+	mockFetch := func(ctx context.Context, version string) (interface{}, error) {
+		switch version {
+		case "error":
+			return nil, errors.New("fetch error")
+		case "nil":
+			return nil, nil
+		case "invalid":
+			return "not a key", nil
+		default:
+			key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+			return &key.PublicKey, nil
+		}
+	}
+
+	cache := NewCache(Config{
+		MaxAge:          100 * time.Millisecond,
+		CleanupInterval: 50 * time.Millisecond,
+		KeyFetchFunc:    mockFetch,
+	})
+
+	testCases := []struct {
+		name        string
+		keyID       string
+		wantErr     bool
+		errContains string
+	}{
+		{
+			name:        "fetch error",
+			keyID:       "test:error",
+			wantErr:     true,
+			errContains: "fetch error",
+		},
+		{
+			name:        "nil key",
+			keyID:       "test:nil",
+			wantErr:     true,
+			errContains: "unsupported key type: <nil>", // Updated error message
+		},
+		{
+			name:        "invalid key type",
+			keyID:       "test:invalid",
+			wantErr:     true,
+			errContains: "unsupported key type",
+		},
+		{
+			name:        "invalid key format",
+			keyID:       "invalid-format",
+			wantErr:     true,
+			errContains: "invalid kid format",
+		},
+		{
+			name:        "valid key",
+			keyID:       "test:valid",
+			wantErr:     false,
+			errContains: "",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			key, err := cache.GetKey(context.Background(), tc.keyID)
+			if tc.wantErr {
+				if err == nil {
+					t.Error("Expected error, got nil")
+				} else if !strings.Contains(err.Error(), tc.errContains) {
+					t.Errorf("Expected error containing %q, got %v", tc.errContains, err)
+				}
+			} else {
+				if err != nil {
+					t.Errorf("Unexpected error: %v", err)
+				}
+				if key == nil {
+					t.Error("Expected key, got nil")
+				}
+			}
+		})
+	}
+}
