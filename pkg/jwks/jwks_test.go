@@ -411,3 +411,63 @@ func TestCacheErrorHandling(t *testing.T) {
 		})
 	}
 }
+
+func TestCacheInvalidation(t *testing.T) {
+	ecKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("Failed to generate ECDSA key: %v", err)
+	}
+
+	fetchCount := 0
+	mockFetch := func(ctx context.Context, version string) (interface{}, error) {
+		fetchCount++
+		return &ecKey.PublicKey, nil
+	}
+
+	cache := NewCache(Config{
+		MaxAge:          time.Hour, // Long enough to not expire during test
+		CleanupInterval: time.Hour,
+		KeyFetchFunc:    mockFetch,
+	})
+
+	// Get key to populate cache
+	keyID := "test:1"
+	_, err = cache.GetKey(context.Background(), keyID)
+	if err != nil {
+		t.Fatalf("Initial GetKey failed: %v", err)
+	}
+	initialFetchCount := fetchCount
+
+	// Get key again - should use cache
+	_, err = cache.GetKey(context.Background(), keyID)
+	if err != nil {
+		t.Fatalf("Second GetKey failed: %v", err)
+	}
+	if fetchCount != initialFetchCount {
+		t.Error("Expected cache hit, got cache miss")
+	}
+
+	// Invalidate key
+	cache.InvalidateKey(keyID)
+
+	// Get key again - should fetch
+	_, err = cache.GetKey(context.Background(), keyID)
+	if err != nil {
+		t.Fatalf("GetKey after invalidation failed: %v", err)
+	}
+	if fetchCount != initialFetchCount+1 {
+		t.Error("Expected cache miss after invalidation")
+	}
+
+	// Clear all keys
+	cache.Clear()
+
+	// Get key again - should fetch
+	_, err = cache.GetKey(context.Background(), keyID)
+	if err != nil {
+		t.Fatalf("GetKey after clear failed: %v", err)
+	}
+	if fetchCount != initialFetchCount+2 {
+		t.Error("Expected cache miss after clear")
+	}
+}
