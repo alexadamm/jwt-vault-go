@@ -2,6 +2,9 @@ package token
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -9,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alexadamm/jwt-vault-go/pkg/jwks"
 	"github.com/alexadamm/jwt-vault-go/pkg/token/algorithms"
 )
 
@@ -256,15 +260,15 @@ func TestJWTVault_Health(t *testing.T) {
 type mockVaultClient struct {
 	getCurrentKeyVersionFunc func() (int64, error)
 	signDataFunc             func(ctx context.Context, data []byte) (string, error)
+	getPublicKeyFunc         func(ctx context.Context, version string) (interface{}, error)
+	rotateKeyFunc            func(ctx context.Context) error
 }
 
 func (m *mockVaultClient) GetCurrentKeyVersion() (int64, error) {
-	return m.getCurrentKeyVersionFunc()
-}
-
-// Add stubs for other interface methods
-func (m *mockVaultClient) GetPublicKey(ctx context.Context, version string) (interface{}, error) {
-	return nil, nil
+	if m.getCurrentKeyVersionFunc != nil {
+		return m.getCurrentKeyVersionFunc()
+	}
+	return 0, nil
 }
 
 func (m *mockVaultClient) SignData(ctx context.Context, data []byte) (string, error) {
@@ -274,7 +278,17 @@ func (m *mockVaultClient) SignData(ctx context.Context, data []byte) (string, er
 	return "", nil
 }
 
+func (m *mockVaultClient) GetPublicKey(ctx context.Context, version string) (interface{}, error) {
+	if m.getPublicKeyFunc != nil {
+		return m.getPublicKeyFunc(ctx, version)
+	}
+	return nil, nil
+}
+
 func (m *mockVaultClient) RotateKey(ctx context.Context) error {
+	if m.rotateKeyFunc != nil {
+		return m.rotateKeyFunc(ctx)
+	}
 	return nil
 }
 
@@ -468,6 +482,138 @@ func TestJWTVault_Sign(t *testing.T) {
 
 			if err == nil && tt.checkJWT != nil {
 				tt.checkJWT(t, token)
+			}
+		})
+	}
+}
+
+func TestJWTVault_Verify(t *testing.T) {
+	validHeader := base64.RawURLEncoding.EncodeToString([]byte(`{"typ":"JWT","alg":"ES256","kid":"test-key:1"}`))
+	validClaims := base64.RawURLEncoding.EncodeToString([]byte(`{"sub":"123","exp":` + fmt.Sprintf("%d", time.Now().Add(time.Hour).Unix()) + `}`))
+	validSignature := base64.RawURLEncoding.EncodeToString([]byte("valid-signature"))
+
+	tests := []struct {
+		name          string
+		setupMock     func() (*jwtVault, *mockVaultClient)
+		token         string
+		wantErr       error
+		checkVerified func(*testing.T, *VerifiedToken)
+	}{
+		{
+			name: "invalid token format",
+			setupMock: func() (*jwtVault, *mockVaultClient) {
+				return &jwtVault{}, nil
+			},
+			token:   "invalid.token",
+			wantErr: ErrInvalidToken,
+		},
+		{
+			name: "invalid header encoding",
+			setupMock: func() (*jwtVault, *mockVaultClient) {
+				return &jwtVault{}, nil
+			},
+			token:   "invalid_base64!" + "." + validClaims + "." + validSignature,
+			wantErr: ErrInvalidToken,
+		},
+		{
+			name: "missing kid in header",
+			setupMock: func() (*jwtVault, *mockVaultClient) {
+				return &jwtVault{}, nil
+			},
+			token:   base64.RawURLEncoding.EncodeToString([]byte(`{"typ":"JWT","alg":"ES256"}`)) + "." + validClaims + "." + validSignature,
+			wantErr: ErrMissingKID,
+		},
+		{
+			name: "invalid claims encoding",
+			setupMock: func() (*jwtVault, *mockVaultClient) {
+				return &jwtVault{}, nil
+			},
+			token:   validHeader + ".invalid_base64!" + "." + validSignature,
+			wantErr: ErrInvalidToken,
+		},
+		{
+			name: "key fetch error",
+			setupMock: func() (*jwtVault, *mockVaultClient) {
+				mock := &mockVaultClient{
+					getPublicKeyFunc: func(ctx context.Context, version string) (interface{}, error) {
+						return nil, fmt.Errorf("key fetch error")
+					},
+				}
+				alg, _ := algorithms.Get("ES256")
+				jv := &jwtVault{
+					vaultClient: mock,
+					algorithm:   alg,
+					config: Config{
+						Algorithm: "ES256",
+					},
+					jwksCache: jwks.NewCache(jwks.Config{
+						MaxAge:       time.Minute,
+						KeyFetchFunc: mock.GetPublicKey,
+					}),
+				}
+				return jv, mock
+			},
+			token:   validHeader + "." + validClaims + "." + validSignature,
+			wantErr: fmt.Errorf("failed to get public key: failed to fetch key: key fetch error"),
+		},
+		{
+			name: "expired token",
+			setupMock: func() (*jwtVault, *mockVaultClient) {
+				mock := &mockVaultClient{
+					getPublicKeyFunc: func(ctx context.Context, version string) (interface{}, error) {
+						key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+						return &key.PublicKey, nil
+					},
+				}
+				alg, _ := algorithms.Get("ES256")
+				return &jwtVault{
+					vaultClient: mock,
+					algorithm:   alg,
+					jwksCache: jwks.NewCache(jwks.Config{
+						MaxAge:       time.Minute,
+						KeyFetchFunc: mock.GetPublicKey,
+					}),
+				}, mock
+			},
+			token: validHeader + "." +
+				base64.RawURLEncoding.EncodeToString([]byte(`{"exp":`+fmt.Sprintf("%d", time.Now().Add(-time.Hour).Unix())+`}`)) +
+				"." + validSignature,
+			wantErr: ErrTokenExpired,
+		},
+		{
+			name: "unsupported algorithm",
+			setupMock: func() (*jwtVault, *mockVaultClient) {
+				return &jwtVault{}, nil
+			},
+			token: base64.RawURLEncoding.EncodeToString([]byte(`{"typ":"JWT","alg":"UNSUPPORTED","kid":"test-key:1"}`)) +
+				"." + validClaims + "." + validSignature,
+			wantErr: fmt.Errorf("unsupported algorithm: unsupported algorithm: UNSUPPORTED"),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			jv, _ := tt.setupMock()
+			verified, err := jv.Verify(context.Background(), tt.token)
+
+			if tt.wantErr != nil {
+				if err == nil {
+					t.Errorf("Verify() expected error %v, got nil", tt.wantErr)
+					return
+				}
+				if tt.wantErr.Error() != err.Error() {
+					t.Errorf("Verify() expected error %v, got %v", tt.wantErr, err)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Errorf("Verify() unexpected error: %v", err)
+				return
+			}
+
+			if tt.checkVerified != nil {
+				tt.checkVerified(t, verified)
 			}
 		})
 	}
