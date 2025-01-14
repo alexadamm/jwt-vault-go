@@ -5,6 +5,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/rsa"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -614,6 +615,185 @@ func TestJWTVault_Verify(t *testing.T) {
 
 			if tt.checkVerified != nil {
 				tt.checkVerified(t, verified)
+			}
+		})
+	}
+}
+
+func TestJWTVault_GetPublicKey(t *testing.T) {
+	tests := []struct {
+		name      string
+		setupMock func() (*jwtVault, *mockVaultClient)
+		kid       string
+		wantErr   error
+		checkKey  func(*testing.T, interface{})
+	}{
+		{
+			name: "successfully get ECDSA key",
+			setupMock: func() (*jwtVault, *mockVaultClient) {
+				mock := &mockVaultClient{
+					getPublicKeyFunc: func(ctx context.Context, version string) (interface{}, error) {
+						key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+						return &key.PublicKey, nil
+					},
+				}
+				alg, _ := algorithms.Get("ES256")
+				return &jwtVault{
+					vaultClient: mock,
+					algorithm:   alg,
+					config: Config{
+						Algorithm:      "ES256",
+						TransitKeyPath: "jwt-key",
+					},
+					jwksCache: jwks.NewCache(jwks.Config{
+						MaxAge:       time.Minute,
+						KeyFetchFunc: mock.GetPublicKey,
+					}),
+				}, mock
+			},
+			kid: "jwt-key:1",
+			checkKey: func(t *testing.T, key interface{}) {
+				if key == nil {
+					t.Fatal("expected key, got nil")
+				}
+				if _, ok := key.(*ecdsa.PublicKey); !ok {
+					t.Errorf("expected *ecdsa.PublicKey, got %T", key)
+				}
+			},
+		},
+		{
+			name: "successfully get RSA key",
+			setupMock: func() (*jwtVault, *mockVaultClient) {
+				mock := &mockVaultClient{
+					getPublicKeyFunc: func(ctx context.Context, version string) (interface{}, error) {
+						key, _ := rsa.GenerateKey(rand.Reader, 2048)
+						return &key.PublicKey, nil
+					},
+				}
+				alg, _ := algorithms.Get("RS256")
+				return &jwtVault{
+					vaultClient: mock,
+					algorithm:   alg,
+					config: Config{
+						Algorithm:      "RS256",
+						TransitKeyPath: "jwt-key",
+					},
+					jwksCache: jwks.NewCache(jwks.Config{
+						MaxAge:       time.Minute,
+						KeyFetchFunc: mock.GetPublicKey,
+					}),
+				}, mock
+			},
+			kid: "jwt-key:1",
+			checkKey: func(t *testing.T, key interface{}) {
+				if key == nil {
+					t.Fatal("expected key, got nil")
+				}
+				if _, ok := key.(*rsa.PublicKey); !ok {
+					t.Errorf("expected *rsa.PublicKey, got %T", key)
+				}
+			},
+		},
+		{
+			name: "key fetch error",
+			setupMock: func() (*jwtVault, *mockVaultClient) {
+				mock := &mockVaultClient{
+					getPublicKeyFunc: func(ctx context.Context, version string) (interface{}, error) {
+						return nil, fmt.Errorf("key fetch error")
+					},
+				}
+				alg, _ := algorithms.Get("ES256")
+				return &jwtVault{
+					vaultClient: mock,
+					algorithm:   alg,
+					config: Config{
+						Algorithm:      "ES256",
+						TransitKeyPath: "jwt-key",
+					},
+					jwksCache: jwks.NewCache(jwks.Config{
+						MaxAge:       time.Minute,
+						KeyFetchFunc: mock.GetPublicKey,
+					}),
+				}, mock
+			},
+			kid:     "jwt-key:1",
+			wantErr: fmt.Errorf("failed to get public key: failed to fetch key: key fetch error"),
+		},
+		{
+			name: "wrong key type for algorithm",
+			setupMock: func() (*jwtVault, *mockVaultClient) {
+				mock := &mockVaultClient{
+					getPublicKeyFunc: func(ctx context.Context, version string) (interface{}, error) {
+						// Return RSA key when ES256 is expected
+						key, _ := rsa.GenerateKey(rand.Reader, 2048)
+						return &key.PublicKey, nil
+					},
+				}
+				alg, _ := algorithms.Get("ES256")
+				return &jwtVault{
+					vaultClient: mock,
+					algorithm:   alg,
+					config: Config{
+						Algorithm:      "ES256",
+						TransitKeyPath: "jwt-key",
+					},
+					jwksCache: jwks.NewCache(jwks.Config{
+						MaxAge:       time.Minute,
+						KeyFetchFunc: mock.GetPublicKey,
+					}),
+				}, mock
+			},
+			kid:     "jwt-key:1",
+			wantErr: fmt.Errorf("invalid key type: expected ECDSA, got *rsa.PublicKey"),
+		},
+		{
+			name: "invalid kid format",
+			setupMock: func() (*jwtVault, *mockVaultClient) {
+				mock := &mockVaultClient{
+					getPublicKeyFunc: func(ctx context.Context, version string) (interface{}, error) {
+						return nil, fmt.Errorf("invalid kid format")
+					},
+				}
+				alg, _ := algorithms.Get("ES256")
+				return &jwtVault{
+					vaultClient: mock,
+					algorithm:   alg,
+					config: Config{
+						Algorithm:      "ES256",
+						TransitKeyPath: "jwt-key",
+					},
+					jwksCache: jwks.NewCache(jwks.Config{
+						MaxAge:       time.Minute,
+						KeyFetchFunc: mock.GetPublicKey,
+					}),
+				}, mock
+			},
+			kid:     "invalid-format",
+			wantErr: fmt.Errorf("failed to get public key: invalid kid format: invalid-format"),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			jv, _ := tt.setupMock()
+			key, err := jv.GetPublicKey(context.Background(), tt.kid)
+
+			if tt.wantErr != nil {
+				if err == nil {
+					t.Fatalf("expected error %v, got nil", tt.wantErr)
+				}
+				if tt.wantErr.Error() != err.Error() {
+					t.Errorf("expected error %v, got %v", tt.wantErr, err)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			if tt.checkKey != nil {
+				tt.checkKey(t, key)
 			}
 		})
 	}
