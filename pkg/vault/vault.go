@@ -16,6 +16,47 @@ import (
 	"github.com/hashicorp/vault/api"
 )
 
+// vaultClientInterface defines the methods we need from the Vault client
+type vaultClientInterface interface {
+	Logical() logicalInterface
+}
+
+// logicalInterface defines the methods we need from Logical
+type logicalInterface interface {
+	Read(path string) (*api.Secret, error)
+	Write(path string, data map[string]interface{}) (*api.Secret, error)
+}
+
+// vaultClientAdapter adapts api.Client to our interface
+type vaultClientAdapter struct {
+	*api.Client
+	logical logicalInterface
+}
+
+func newVaultClientAdapter(client *api.Client) *vaultClientAdapter {
+	return &vaultClientAdapter{
+		Client:  client,
+		logical: &logicalAdapter{client.Logical()},
+	}
+}
+
+func (a *vaultClientAdapter) Logical() logicalInterface {
+	return a.logical
+}
+
+// logicalAdapter adapts api.Logical to our interface
+type logicalAdapter struct {
+	*api.Logical
+}
+
+func (a *logicalAdapter) Read(path string) (*api.Secret, error) {
+	return a.Logical.Read(path)
+}
+
+func (a *logicalAdapter) Write(path string, data map[string]interface{}) (*api.Secret, error) {
+	return a.Logical.Write(path, data)
+}
+
 // Client wraps HashiCorp Vault's Transit engine client
 // Handles:
 // - Signing operations with JWS format
@@ -23,7 +64,7 @@ import (
 // - Key version management
 // - Key rotation
 type Client struct {
-	client      *api.Client
+	client      vaultClientInterface
 	transitPath string
 	keyVersion  int64
 	keyType     string
@@ -66,16 +107,21 @@ func NewClient(config Config, algorithm algorithms.Algorithm) (*Client, error) {
 	vaultConfig := api.DefaultConfig()
 	vaultConfig.Address = config.Address
 
-	client, err := api.NewClient(vaultConfig)
+	apiClient, err := api.NewClient(vaultConfig)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create vault client: %w", err)
 	}
 
-	client.SetToken(config.Token)
+	apiClient.SetToken(config.Token)
+
+
+	// Create adapter
+	vaultClient := newVaultClientAdapter(apiClient)
+
 
 	// Create client instance
 	vc := &Client{
-		client:      client,
+		client:      vaultClient,
 		transitPath: config.TransitPath,
 		keyType:     algorithm.VaultKeyType(),
 		hash:        algorithm.Hash(),
