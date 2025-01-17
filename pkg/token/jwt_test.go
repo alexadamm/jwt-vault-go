@@ -2,6 +2,7 @@ package token
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -9,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alexadamm/jwt-vault-go/pkg/jwks"
 	"github.com/hashicorp/vault/api"
 )
 
@@ -248,4 +250,157 @@ func getKeyTypeForAlg(alg string) string {
 	default:
 		return ""
 	}
+}
+
+// mockJWKSCache implements JWKSCacheInterface for testing
+type mockJWKSCache struct {
+	getKeyFunc      func(ctx context.Context, kid string) (interface{}, error)
+	getKeyWithType  func(ctx context.Context, kid string) (interface{}, jwks.KeyType, error)
+}
+
+func (m *mockJWKSCache) GetKey(ctx context.Context, kid string) (interface{}, error) {
+	if m.getKeyFunc != nil {
+		return m.getKeyFunc(ctx, kid)
+	}
+	return nil, nil
+}
+
+func (m *mockJWKSCache) GetKeyWithType(ctx context.Context, kid string) (interface{}, jwks.KeyType, error) {
+	if m.getKeyWithType != nil {
+		return m.getKeyWithType(ctx, kid)
+	}
+	return nil, 0, nil
+}
+
+func TestJWTClaims(t *testing.T) {
+	// Create a mock JWKS cache for testing
+	mockCache := &mockJWKSCache{
+		getKeyFunc: func(ctx context.Context, kid string) (interface{}, error) {
+			return nil, nil // Key not needed for claims tests
+		},
+	}
+
+	jv := &jwtVault{
+		jwksCache: mockCache,
+		config: Config{
+			TransitKeyPath: "test-key",
+		},
+	}
+
+	t.Run("Invalid Token Format", func(t *testing.T) {
+		invalidTokens := []string{
+			"",                    // Empty token
+			"single.part",        // One part
+			"two.parts",          // Two parts
+			"too.many.parts.here", // Four parts
+			"invalid.*.parts",    // Invalid characters
+		}
+
+		for _, token := range invalidTokens {
+			_, err := jv.Verify(context.Background(), token)
+			if err != ErrInvalidToken {
+				t.Errorf("Expected ErrInvalidToken for %q, got %v", token, err)
+			}
+		}
+	})
+
+	t.Run("Invalid Base64 Header", func(t *testing.T) {
+		token := "invalid_base64.eyJzdWIiOiIxMjM0NTY3ODkwIn0.signature"
+		_, err := jv.Verify(context.Background(), token)
+		if err != ErrInvalidToken {
+			t.Errorf("Expected ErrInvalidToken, got %v", err)
+		}
+	})
+
+	t.Run("Invalid Base64 Claims", func(t *testing.T) {
+		header := base64.RawURLEncoding.EncodeToString([]byte(`{"typ":"JWT","alg":"ES256","kid":"test-key:1"}`))
+		token := header + ".invalid_base64.signature"
+		_, err := jv.Verify(context.Background(), token)
+		if err != ErrInvalidClaims {
+			t.Errorf("Expected ErrInvalidClaims, got %v", err)
+		}
+	})
+
+	t.Run("Invalid Header JSON", func(t *testing.T) {
+		invalidJSON := base64.RawURLEncoding.EncodeToString([]byte(`{"typ":JWT`)) // Invalid JSON
+		claims := base64.RawURLEncoding.EncodeToString([]byte(`{}`))
+		token := invalidJSON + "." + claims + ".signature"
+		_, err := jv.Verify(context.Background(), token)
+		if err != ErrInvalidToken {
+			t.Errorf("Expected ErrInvalidToken, got %v", err)
+		}
+	})
+
+	t.Run("Invalid Claims JSON", func(t *testing.T) {
+		header := base64.RawURLEncoding.EncodeToString([]byte(`{"typ":"JWT","alg":"ES256","kid":"test-key:1"}`))
+		invalidClaims := base64.RawURLEncoding.EncodeToString([]byte(`{"sub":123`)) // Invalid JSON
+		token := header + "." + invalidClaims + ".signature"
+		_, err := jv.Verify(context.Background(), token)
+		if err != ErrInvalidClaims {
+			t.Errorf("Expected ErrInvalidClaims, got %v", err)
+		}
+	})
+
+	t.Run("Invalid Header Type", func(t *testing.T) {
+		header := base64.RawURLEncoding.EncodeToString([]byte(`{"typ":"NOT-JWT","alg":"ES256","kid":"test-key:1"}`))
+		claims := base64.RawURLEncoding.EncodeToString([]byte(`{}`))
+		token := header + "." + claims + ".signature"
+		_, err := jv.Verify(context.Background(), token)
+		if err != ErrInvalidToken {
+			t.Errorf("Expected ErrInvalidToken, got %v", err)
+		}
+	})
+
+	t.Run("Missing KID", func(t *testing.T) {
+		header := base64.RawURLEncoding.EncodeToString([]byte(`{"typ":"JWT","alg":"ES256"}`))
+		claims := base64.RawURLEncoding.EncodeToString([]byte(`{}`))
+		token := header + "." + claims + ".signature"
+		_, err := jv.Verify(context.Background(), token)
+		if err != ErrMissingKID {
+			t.Errorf("Expected ErrMissingKID, got %v", err)
+		}
+	})
+
+	t.Run("Claims Time Validation", func(t *testing.T) {
+		header := base64.RawURLEncoding.EncodeToString([]byte(`{"typ":"JWT","alg":"ES256","kid":"test-key:1"}`))
+		testCases := []struct {
+			name    string
+			claims  StandardClaims
+			wantErr error
+		}{
+			{
+				name: "Expired Token",
+				claims: StandardClaims{
+					ExpiresAt: time.Now().Add(-time.Hour).Unix(),
+				},
+				wantErr: ErrTokenExpired,
+			},
+			{
+				name: "Not Yet Valid",
+				claims: StandardClaims{
+					NotBefore: time.Now().Add(time.Hour).Unix(),
+				},
+				wantErr: ErrTokenNotValidYet,
+			},
+			{
+				name: "Used Before Issued",
+				claims: StandardClaims{
+					IssuedAt: time.Now().Add(time.Hour).Unix(),
+				},
+				wantErr: ErrTokenUsedBeforeIssued,
+			},
+		}
+
+		for _, tc := range testCases {
+			t.Run(tc.name, func(t *testing.T) {
+				claimsJSON, _ := json.Marshal(tc.claims)
+				claimsB64 := base64.RawURLEncoding.EncodeToString(claimsJSON)
+				token := header + "." + claimsB64 + ".signature"
+				_, err := jv.Verify(context.Background(), token)
+				if err != tc.wantErr {
+					t.Errorf("Expected %v, got %v", tc.wantErr, err)
+				}
+			})
+		}
+	})
 }
