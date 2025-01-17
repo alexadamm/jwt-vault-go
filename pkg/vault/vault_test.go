@@ -2,9 +2,11 @@ package vault
 
 import (
 	"context"
+	"crypto"
 	"crypto/ecdsa"
 	"crypto/rsa"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -170,4 +172,210 @@ func setupTestKey(t *testing.T, config Config, keyType string) {
 	if err != nil {
 		t.Fatalf("Failed to create test key: %v", err)
 	}
+}
+
+// mockVaultClient implements vaultClientInterface for testing
+type mockVaultClient struct {
+	logical *mockLogical
+}
+
+func (m *mockVaultClient) Logical() logicalInterface {
+	return m.logical
+}
+
+// mockLogical implements logicalInterface for testing
+type mockLogical struct {
+	readFn  func(string) (*api.Secret, error)
+	writeFn func(string, map[string]interface{}) (*api.Secret, error)
+}
+
+func (m *mockLogical) Read(path string) (*api.Secret, error) {
+	if m.readFn != nil {
+		return m.readFn(path)
+	}
+	return nil, nil
+}
+
+func (m *mockLogical) Write(path string, data map[string]interface{}) (*api.Secret, error) {
+	if m.writeFn != nil {
+		return m.writeFn(path, data)
+	}
+	return nil, nil
+}
+
+func TestVaultClientErrors(t *testing.T) {
+	t.Run("Key Read Error", func(t *testing.T) {
+		mock := &mockVaultClient{
+			logical: &mockLogical{
+				readFn: func(path string) (*api.Secret, error) {
+					return nil, fmt.Errorf("read error")
+				},
+			},
+		}
+
+		client := &Client{
+			client:      mock,
+			transitPath: "test-key",
+			hash:       crypto.SHA256,
+		}
+
+		_, err := client.GetCurrentKeyVersion()
+		if err == nil {
+			t.Error("Expected error from GetCurrentKeyVersion")
+		}
+		if err.Error() != "failed to read key info: read error" {
+			t.Errorf("Unexpected error: %v", err)
+		}
+	})
+
+	t.Run("Invalid Key Type", func(t *testing.T) {
+		alg, _ := algorithms.Get("ES256")
+		mock := &mockVaultClient{
+			logical: &mockLogical{
+				readFn: func(path string) (*api.Secret, error) {
+					keyInfo := KeyInfo{
+						Type:      "wrong-type",
+						KeyBits:   256,
+						LatestVer: 1,
+					}
+					data, _ := json.Marshal(keyInfo)
+					var rawData map[string]interface{}
+					json.Unmarshal(data, &rawData)
+					return &api.Secret{Data: rawData}, nil
+				},
+			},
+		}
+
+		client := &Client{
+			client:      mock,
+			transitPath: "test-key",
+			keyType:     alg.VaultKeyType(), // Set the expected key type
+			hash:       crypto.SHA256,
+			algorithm:  alg,
+		}
+
+		err := client.validateKeyType()
+		if err == nil {
+			t.Error("Expected error from validateKeyType")
+		}
+		if err.Error() != "key type mismatch: expected ecdsa-p256, got wrong-type" {
+			t.Errorf("Unexpected error: %v", err)
+		}
+	})
+
+	t.Run("Sign Error", func(t *testing.T) {
+		alg, _ := algorithms.Get("ES256")
+		mock := &mockVaultClient{
+			logical: &mockLogical{
+				writeFn: func(path string, data map[string]interface{}) (*api.Secret, error) {
+					return nil, fmt.Errorf("signing error")
+				},
+			},
+		}
+
+		client := &Client{
+			client:      mock,
+			transitPath: "test-key",
+			hash:       crypto.SHA256,
+			algorithm:  alg,
+			keyType:    alg.VaultKeyType(),
+		}
+
+		_, err := client.SignData(context.Background(), []byte("test data"))
+		if err == nil {
+			t.Error("Expected error from SignData")
+		}
+		if err.Error() != "failed to sign data: signing error" {
+			t.Errorf("Unexpected error: %v", err)
+		}
+	})
+
+	t.Run("Invalid Signature Response", func(t *testing.T) {
+		alg, _ := algorithms.Get("ES256")
+		mock := &mockVaultClient{
+			logical: &mockLogical{
+				writeFn: func(path string, data map[string]interface{}) (*api.Secret, error) {
+					return &api.Secret{
+						Data: map[string]interface{}{
+							"not_signature": "invalid",
+						},
+					}, nil
+				},
+			},
+		}
+
+		client := &Client{
+			client:      mock,
+			transitPath: "test-key",
+			hash:       crypto.SHA256,
+			algorithm:  alg,
+			keyType:    alg.VaultKeyType(),
+		}
+
+		_, err := client.SignData(context.Background(), []byte("test data"))
+		if err == nil {
+			t.Error("Expected error from SignData")
+		}
+		if err.Error() != "signature not found in Vault response" {
+			t.Errorf("Unexpected error: %v", err)
+		}
+	})
+
+	t.Run("Invalid Signature Format", func(t *testing.T) {
+		alg, _ := algorithms.Get("ES256")
+		mock := &mockVaultClient{
+			logical: &mockLogical{
+				writeFn: func(path string, data map[string]interface{}) (*api.Secret, error) {
+					return &api.Secret{
+						Data: map[string]interface{}{
+							"signature": "invalid-format",
+						},
+					}, nil
+				},
+			},
+		}
+
+		client := &Client{
+			client:      mock,
+			transitPath: "test-key",
+			hash:       crypto.SHA256,
+			algorithm:  alg,
+			keyType:    alg.VaultKeyType(),
+		}
+
+		_, err := client.SignData(context.Background(), []byte("test data"))
+		if err == nil {
+			t.Error("Expected error from SignData")
+		}
+		if err.Error() != "invalid signature format" {
+			t.Errorf("Unexpected error: %v", err)
+		}
+	})
+
+	t.Run("Rotate Error", func(t *testing.T) {
+		alg, _ := algorithms.Get("ES256")
+		mock := &mockVaultClient{
+			logical: &mockLogical{
+				writeFn: func(path string, data map[string]interface{}) (*api.Secret, error) {
+					return nil, fmt.Errorf("rotation error")
+				},
+			},
+		}
+
+		client := &Client{
+			client:      mock,
+			transitPath: "test-key",
+			hash:       crypto.SHA256,
+			algorithm:  alg,
+			keyType:    alg.VaultKeyType(),
+		}
+
+		err := client.RotateKey(context.Background())
+		if err == nil {
+			t.Error("Expected error from RotateKey")
+		}
+		if err.Error() != "failed to rotate key: rotation error" {
+			t.Errorf("Unexpected error: %v", err)
+		}
+	})
 }
