@@ -26,10 +26,16 @@ var DefaultConfig = Config{
 	},
 }
 
+// JWKSCacheInterface defines the interface for JWKS caching
+type JWKSCacheInterface interface {
+	GetKey(ctx context.Context, kid string) (interface{}, error)
+	GetKeyWithType(ctx context.Context, kid string) (interface{}, jwks.KeyType, error)
+}
+
 // jwtVault implements the JWTVault interface
 type jwtVault struct {
 	vaultClient VaultClient
-	jwksCache   *jwks.Cache
+	jwksCache   JWKSCacheInterface
 	config      Config
 	algorithm   algorithms.Algorithm // Default algorithm
 }
