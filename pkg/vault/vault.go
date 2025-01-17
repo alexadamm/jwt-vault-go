@@ -114,10 +114,8 @@ func NewClient(config Config, algorithm algorithms.Algorithm) (*Client, error) {
 
 	apiClient.SetToken(config.Token)
 
-
 	// Create adapter
 	vaultClient := newVaultClientAdapter(apiClient)
-
 
 	// Create client instance
 	vc := &Client{

@@ -216,7 +216,7 @@ func TestVaultClientErrors(t *testing.T) {
 		client := &Client{
 			client:      mock,
 			transitPath: "test-key",
-			hash:       crypto.SHA256,
+			hash:        crypto.SHA256,
 		}
 
 		_, err := client.GetCurrentKeyVersion()
@@ -240,7 +240,9 @@ func TestVaultClientErrors(t *testing.T) {
 					}
 					data, _ := json.Marshal(keyInfo)
 					var rawData map[string]interface{}
-					json.Unmarshal(data, &rawData)
+					if err := json.Unmarshal(data, &rawData); err != nil {
+						t.Fatalf("Failed to unmarshal key info: %v", err)
+					}
 					return &api.Secret{Data: rawData}, nil
 				},
 			},
@@ -250,8 +252,8 @@ func TestVaultClientErrors(t *testing.T) {
 			client:      mock,
 			transitPath: "test-key",
 			keyType:     alg.VaultKeyType(), // Set the expected key type
-			hash:       crypto.SHA256,
-			algorithm:  alg,
+			hash:        crypto.SHA256,
+			algorithm:   alg,
 		}
 
 		err := client.validateKeyType()
@@ -276,9 +278,9 @@ func TestVaultClientErrors(t *testing.T) {
 		client := &Client{
 			client:      mock,
 			transitPath: "test-key",
-			hash:       crypto.SHA256,
-			algorithm:  alg,
-			keyType:    alg.VaultKeyType(),
+			hash:        crypto.SHA256,
+			algorithm:   alg,
+			keyType:     alg.VaultKeyType(),
 		}
 
 		_, err := client.SignData(context.Background(), []byte("test data"))
@@ -307,9 +309,9 @@ func TestVaultClientErrors(t *testing.T) {
 		client := &Client{
 			client:      mock,
 			transitPath: "test-key",
-			hash:       crypto.SHA256,
-			algorithm:  alg,
-			keyType:    alg.VaultKeyType(),
+			hash:        crypto.SHA256,
+			algorithm:   alg,
+			keyType:     alg.VaultKeyType(),
 		}
 
 		_, err := client.SignData(context.Background(), []byte("test data"))
@@ -338,9 +340,9 @@ func TestVaultClientErrors(t *testing.T) {
 		client := &Client{
 			client:      mock,
 			transitPath: "test-key",
-			hash:       crypto.SHA256,
-			algorithm:  alg,
-			keyType:    alg.VaultKeyType(),
+			hash:        crypto.SHA256,
+			algorithm:   alg,
+			keyType:     alg.VaultKeyType(),
 		}
 
 		_, err := client.SignData(context.Background(), []byte("test data"))
@@ -365,9 +367,9 @@ func TestVaultClientErrors(t *testing.T) {
 		client := &Client{
 			client:      mock,
 			transitPath: "test-key",
-			hash:       crypto.SHA256,
-			algorithm:  alg,
-			keyType:    alg.VaultKeyType(),
+			hash:        crypto.SHA256,
+			algorithm:   alg,
+			keyType:     alg.VaultKeyType(),
 		}
 
 		err := client.RotateKey(context.Background())

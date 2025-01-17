@@ -38,7 +38,7 @@ func TestBaseAlgorithm(t *testing.T) {
 
 	t.Run("SigningParams", func(t *testing.T) {
 		params := base.SigningParams()
-		
+
 		if params["prehashed"] != true {
 			t.Error("Expected prehashed=true in signing params")
 		}
@@ -88,13 +88,4 @@ func TestBaseAlgorithm(t *testing.T) {
 			t.Errorf("Expected ErrInvalidKeyType for wrong key type, got %v", err)
 		}
 	})
-}
-
-// Mock key types for testing
-type mockECDSAKey struct {
-	*ecdsa.PublicKey
-}
-
-type mockRSAKey struct {
-	*rsa.PublicKey
 }

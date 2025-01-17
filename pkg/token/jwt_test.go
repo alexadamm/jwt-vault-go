@@ -254,8 +254,8 @@ func getKeyTypeForAlg(alg string) string {
 
 // mockJWKSCache implements JWKSCacheInterface for testing
 type mockJWKSCache struct {
-	getKeyFunc      func(ctx context.Context, kid string) (interface{}, error)
-	getKeyWithType  func(ctx context.Context, kid string) (interface{}, jwks.KeyType, error)
+	getKeyFunc     func(ctx context.Context, kid string) (interface{}, error)
+	getKeyWithType func(ctx context.Context, kid string) (interface{}, jwks.KeyType, error)
 }
 
 func (m *mockJWKSCache) GetKey(ctx context.Context, kid string) (interface{}, error) {
@@ -290,10 +290,10 @@ func TestJWTClaims(t *testing.T) {
 	t.Run("Invalid Token Format", func(t *testing.T) {
 		invalidTokens := []string{
 			"",                    // Empty token
-			"single.part",        // One part
-			"two.parts",          // Two parts
+			"single.part",         // One part
+			"two.parts",           // Two parts
 			"too.many.parts.here", // Four parts
-			"invalid.*.parts",    // Invalid characters
+			"invalid.*.parts",     // Invalid characters
 		}
 
 		for _, token := range invalidTokens {

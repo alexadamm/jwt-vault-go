@@ -22,7 +22,6 @@ func TestRegistry(t *testing.T) {
 		}
 	})
 
-
 	t.Run("Get non-existent algorithm", func(t *testing.T) {
 		_, err := Get("NONEXISTENT")
 		if err == nil {
