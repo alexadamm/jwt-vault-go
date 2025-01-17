@@ -468,3 +468,203 @@ func TestCacheInvalidation(t *testing.T) {
 		t.Error("Expected cache miss after clear")
 	}
 }
+
+func TestCacheCleanup(t *testing.T) {
+	fetchCount := 0
+	mock := func(ctx context.Context, version string) (interface{}, error) {
+		fetchCount++
+		key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+		return &key.PublicKey, nil
+	}
+
+	cache := NewCache(Config{
+		MaxAge:          50 * time.Millisecond,
+		CleanupInterval: 25 * time.Millisecond,
+		KeyFetchFunc:    mock,
+	})
+
+	// Get a key to populate cache
+	_, err := cache.GetKey(context.Background(), "test:1")
+	if err != nil {
+		t.Fatalf("Failed to get key: %v", err)
+	}
+	initialCount := fetchCount
+
+	// Wait for one cleanup cycle
+	time.Sleep(75 * time.Millisecond)
+
+	// Try to get the key again, should trigger a new fetch
+	_, err = cache.GetKey(context.Background(), "test:1")
+	if err != nil {
+		t.Fatalf("Failed to get key after cleanup: %v", err)
+	}
+
+	if fetchCount <= initialCount {
+		t.Error("Expected new fetch after cleanup")
+	}
+}
+
+func TestCacheInvalidationConcurrent(t *testing.T) {
+	var (
+		fetchCount int
+		fetchMutex sync.Mutex
+	)
+
+	mock := func(ctx context.Context, version string) (interface{}, error) {
+		fetchMutex.Lock()
+		fetchCount++
+		fetchMutex.Unlock()
+		key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+		return &key.PublicKey, nil
+	}
+
+	cache := NewCache(Config{
+		MaxAge:          time.Hour, // Long enough to not expire
+		CleanupInterval: time.Hour,
+		KeyFetchFunc:    mock,
+	})
+
+	// Concurrent access and invalidation
+	const numWorkers = 10
+	var wg sync.WaitGroup
+	wg.Add(numWorkers * 2) // Workers + invalidators
+
+	// Workers continuously get keys
+	for i := 0; i < numWorkers; i++ {
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 10; j++ {
+				_, err := cache.GetKey(context.Background(), "test:1")
+				if err != nil {
+					t.Errorf("Failed to get key: %v", err)
+				}
+				time.Sleep(time.Millisecond)
+			}
+		}()
+	}
+
+	// Invalidators continuously invalidate
+	for i := 0; i < numWorkers; i++ {
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 5; j++ {
+				cache.InvalidateKey("test:1")
+				time.Sleep(time.Millisecond)
+			}
+		}()
+	}
+
+	wg.Wait()
+
+	// Should have more fetches due to invalidations
+	if fetchCount < numWorkers {
+		t.Errorf("Expected at least %d fetches, got %d", numWorkers, fetchCount)
+	}
+}
+
+func TestConcurrentCacheAccess(t *testing.T) {
+	var (
+		fetchCount int
+		fetchMutex sync.Mutex
+		fetchDelay = 10 * time.Millisecond // Simulate slow fetches
+	)
+
+	mock := func(ctx context.Context, version string) (interface{}, error) {
+		time.Sleep(fetchDelay) // Simulate network delay
+		fetchMutex.Lock()
+		fetchCount++
+		val := fetchCount
+		fetchMutex.Unlock()
+		if val%4 == 0 {
+			return nil, errors.New("simulated fetch error")
+		}
+		key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+		return &key.PublicKey, nil
+	}
+
+	cache := NewCache(Config{
+		MaxAge:          50 * time.Millisecond,
+		CleanupInterval: 10 * time.Millisecond,
+		KeyFetchFunc:    mock,
+	})
+
+	const numWorkers = 5
+	const numRequests = 10
+	errs := make(chan error, numWorkers*numRequests)
+	var wg sync.WaitGroup
+	wg.Add(numWorkers)
+
+	for i := 0; i < numWorkers; i++ {
+		go func() {
+			defer wg.Done()
+			for j := 0; j < numRequests; j++ {
+				key, err := cache.GetKey(context.Background(), "test:1")
+				if err != nil {
+					errs <- err
+					continue
+				}
+				if key == nil {
+					errs <- errors.New("received nil key without error")
+				}
+				// Short sleep to allow other goroutines to run
+				time.Sleep(time.Millisecond)
+			}
+		}()
+	}
+
+	wg.Wait()
+	close(errs)
+
+	// Count errors
+	errorCount := 0
+	for err := range errs {
+		if err != nil {
+			errorCount++
+		}
+	}
+
+	// We expect some errors due to simulated failures
+	t.Logf("Got %d errors out of %d requests", errorCount, numWorkers*numRequests)
+	if fetchCount >= numWorkers*numRequests {
+		t.Errorf("Cache didn't reduce fetch count: got %d fetches for %d requests",
+			fetchCount, numWorkers*numRequests)
+	}
+}
+
+func TestKeyTypeDetermination(t *testing.T) {
+	// Test RSA key size variants
+	rsaSizes := []int{2048, 3072, 4096}
+	for _, size := range rsaSizes {
+		t.Run("RSA-"+string(rune(size)), func(t *testing.T) {
+			key, err := rsa.GenerateKey(rand.Reader, size)
+			if err != nil {
+				t.Fatalf("Failed to generate RSA-%d key: %v", size, err)
+			}
+			keyType, err := determineKeyType(&key.PublicKey)
+			if err != nil {
+				t.Errorf("Failed to determine key type: %v", err)
+			}
+			if keyType != KeyTypeRSA {
+				t.Errorf("Expected RSA key type, got %v", keyType)
+			}
+		})
+	}
+
+	// Test ECDSA curve variants
+	curves := []elliptic.Curve{elliptic.P256(), elliptic.P384(), elliptic.P521()}
+	for _, curve := range curves {
+		t.Run(curve.Params().Name, func(t *testing.T) {
+			key, err := ecdsa.GenerateKey(curve, rand.Reader)
+			if err != nil {
+				t.Fatalf("Failed to generate ECDSA key: %v", err)
+			}
+			keyType, err := determineKeyType(&key.PublicKey)
+			if err != nil {
+				t.Errorf("Failed to determine key type: %v", err)
+			}
+			if keyType != KeyTypeECDSA {
+				t.Errorf("Expected ECDSA key type, got %v", keyType)
+			}
+		})
+	}
+}
