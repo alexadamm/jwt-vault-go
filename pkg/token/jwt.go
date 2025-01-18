@@ -308,6 +308,26 @@ func (j *jwtVault) RotateKey(ctx context.Context) error {
 	return nil
 }
 
+// RefreshKeyState implements JWTVault.RefreshKeyState
+func (j *jwtVault) RefreshKeyState(ctx context.Context) error {
+	// Force fetch new version regardless of cache
+	version, err := j.vaultClient.GetCurrentKeyVersion()
+	if err != nil {
+		return fmt.Errorf("failed to get current key version: %w", err)
+	}
+
+	// Update version cache
+	j.versionCache.Lock()
+	j.versionCache.version = version
+	j.versionCache.fetchedAt = time.Now()
+	j.versionCache.Unlock()
+
+	// Clear JWKS cache to force fresh key fetch
+	j.jwksCache.Clear()
+
+	return nil
+}
+
 // Health returns the current health status
 func (j *jwtVault) Health(ctx context.Context) (*HealthStatus, error) {
 	// Get current key version

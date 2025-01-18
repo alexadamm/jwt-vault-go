@@ -30,6 +30,15 @@ type JWTVault interface {
 	// New tokens will be signed with the latest key version
 	RotateKey(ctx context.Context) error
 
+	// RefreshKeyState forces a refresh of the key state from Vault
+	// This is particularly useful in distributed systems to sync key state across nodes
+	// without triggering new rotations. It will:
+	// - Fetch the latest key version from Vault
+	// - Update the local version cache
+	// - Clear the JWKS cache to force fresh key fetches
+	// Returns an error if the refresh fails due to Vault connectivity issues
+	RefreshKeyState(ctx context.Context) error
+
 	// Health checks the health status of the JWT-Vault service
 	// Verifies access to Vault and key availability
 	Health(ctx context.Context) (*HealthStatus, error)
