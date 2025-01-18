@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"math/big"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/alexadamm/jwt-vault-go/pkg/jwks"
@@ -26,12 +27,25 @@ var DefaultConfig = Config{
 	},
 }
 
+// JWKSCacheInterface defines the interface for JWKS caching
+type JWKSCacheInterface interface {
+	GetKey(ctx context.Context, kid string) (interface{}, error)
+	GetKeyWithType(ctx context.Context, kid string) (interface{}, jwks.KeyType, error)
+	Clear()
+}
+
 // jwtVault implements the JWTVault interface
 type jwtVault struct {
-	vaultClient *vault.Client
-	jwksCache   *jwks.Cache
-	config      Config
-	algorithm   algorithms.Algorithm // Default algorithm
+	vaultClient  VaultClient
+	jwksCache    JWKSCacheInterface
+	config       Config
+	algorithm    algorithms.Algorithm // Default algorithm
+	versionCache struct {
+		sync.RWMutex
+		version   int64
+		fetchedAt time.Time
+		ttl       time.Duration
+	}
 }
 
 // New creates a new JWTVault instance
@@ -64,17 +78,63 @@ func New(config Config) (JWTVault, error) {
 		KeyFetchFunc:    vaultClient.GetPublicKey,
 	})
 
-	return &jwtVault{
+	jv := &jwtVault{
 		vaultClient: vaultClient,
 		jwksCache:   jwksCache,
 		config:      config,
 		algorithm:   algorithm,
-	}, nil
+	}
+
+	// Initialize version cache
+	jv.versionCache.ttl = config.CacheTTL
+	if jv.versionCache.ttl == 0 {
+		jv.versionCache.ttl = 5 * time.Minute
+	}
+
+	// Get initial version
+	version, err := vaultClient.GetCurrentKeyVersion()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get initial key version: %w", err)
+	}
+
+	jv.versionCache.version = version
+	jv.versionCache.fetchedAt = time.Now()
+
+	return jv, nil
 }
 
-// Sign creates a new JWT with the provided claims
+func (j *jwtVault) getCurrentKeyVersion() (int64, error) {
+	j.versionCache.RLock()
+	if time.Since(j.versionCache.fetchedAt) < j.versionCache.ttl {
+		version := j.versionCache.version
+		j.versionCache.RUnlock()
+		return version, nil
+	}
+	j.versionCache.RUnlock()
+
+	// Need to refresh
+	j.versionCache.Lock()
+	defer j.versionCache.Unlock()
+
+	// Double check after acquiring write lock
+	if time.Since(j.versionCache.fetchedAt) < j.versionCache.ttl {
+		return j.versionCache.version, nil
+	}
+
+	// Fetch new version
+	version, err := j.vaultClient.GetCurrentKeyVersion()
+	if err != nil {
+		return 0, err
+	}
+
+	j.versionCache.version = version
+	j.versionCache.fetchedAt = time.Now()
+
+	return version, nil
+}
+
 func (j *jwtVault) Sign(ctx context.Context, claims interface{}) (string, error) {
-	keyVersion, err := j.vaultClient.GetCurrentKeyVersion()
+	keyVersion, err := j.getCurrentKeyVersion()
 	if err != nil {
 		return "", fmt.Errorf("failed to get key version: %w", err)
 	}
@@ -103,7 +163,7 @@ func (j *jwtVault) Sign(ctx context.Context, claims interface{}) (string, error)
 	signingInput := headerB64 + "." + claimsB64
 
 	// Sign the data with Vault
-	signature, err := j.vaultClient.SignData(ctx, []byte(signingInput))
+	signature, err := j.vaultClient.SignData(ctx, []byte(signingInput), keyVersion)
 	if err != nil {
 		return "", fmt.Errorf("failed to sign token: %w", err)
 	}
@@ -225,7 +285,47 @@ func (j *jwtVault) GetPublicKey(ctx context.Context, kid string) (interface{}, e
 
 // RotateKey triggers a rotation of the signing key
 func (j *jwtVault) RotateKey(ctx context.Context) error {
-	return j.vaultClient.RotateKey(ctx)
+	err := j.vaultClient.RotateKey(ctx)
+	if err != nil {
+		return err
+	}
+
+	// Immediately update cached version after rotation
+	j.versionCache.Lock()
+	defer j.versionCache.Unlock()
+
+	version, err := j.vaultClient.GetCurrentKeyVersion()
+	if err != nil {
+		return err
+	}
+
+	j.versionCache.version = version
+	j.versionCache.fetchedAt = time.Now()
+
+	// Clear JWKS cache since keys changed
+	j.jwksCache.Clear()
+
+	return nil
+}
+
+// RefreshKeyState implements JWTVault.RefreshKeyState
+func (j *jwtVault) RefreshKeyState(ctx context.Context) error {
+	// Force fetch new version regardless of cache
+	version, err := j.vaultClient.GetCurrentKeyVersion()
+	if err != nil {
+		return fmt.Errorf("failed to get current key version: %w", err)
+	}
+
+	// Update version cache
+	j.versionCache.Lock()
+	j.versionCache.version = version
+	j.versionCache.fetchedAt = time.Now()
+	j.versionCache.Unlock()
+
+	// Clear JWKS cache to force fresh key fetch
+	j.jwksCache.Clear()
+
+	return nil
 }
 
 // Health returns the current health status

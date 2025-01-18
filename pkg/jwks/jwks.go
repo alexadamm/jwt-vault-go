@@ -93,15 +93,31 @@ func (c *Cache) GetKeyWithType(ctx context.Context, kid string) (interface{}, Ke
 
 func (c *Cache) getFromCache(kid string) interface{} {
 	c.RLock()
-	defer c.RUnlock()
-
-	if cached, exists := c.keys[kid]; exists {
-		if time.Since(cached.fetchedAt) < c.maxAge {
-			cached.lastUsed = time.Now()
-			return cached.key
-		}
+	cached, exists := c.keys[kid]
+	if !exists {
+		c.RUnlock()
+		return nil
 	}
-	return nil
+
+	// Check if expired
+	if time.Since(cached.fetchedAt) >= c.maxAge {
+		c.RUnlock()
+		return nil
+	}
+
+	// Upgrade to write lock to update lastUsed
+	c.RUnlock()
+	c.Lock()
+	defer c.Unlock()
+
+	// Re-check everything under write lock to avoid race conditions
+	cached, exists = c.keys[kid]
+	if !exists || time.Since(cached.fetchedAt) >= c.maxAge {
+		return nil
+	}
+
+	cached.lastUsed = time.Now()
+	return cached.key
 }
 
 func (c *Cache) fetchAndCache(ctx context.Context, kid string) (interface{}, error) {

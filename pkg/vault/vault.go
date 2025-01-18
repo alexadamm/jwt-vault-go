@@ -16,6 +16,47 @@ import (
 	"github.com/hashicorp/vault/api"
 )
 
+// vaultClientInterface defines the methods we need from the Vault client
+type vaultClientInterface interface {
+	Logical() logicalInterface
+}
+
+// logicalInterface defines the methods we need from Logical
+type logicalInterface interface {
+	Read(path string) (*api.Secret, error)
+	Write(path string, data map[string]interface{}) (*api.Secret, error)
+}
+
+// vaultClientAdapter adapts api.Client to our interface
+type vaultClientAdapter struct {
+	*api.Client
+	logical logicalInterface
+}
+
+func newVaultClientAdapter(client *api.Client) *vaultClientAdapter {
+	return &vaultClientAdapter{
+		Client:  client,
+		logical: &logicalAdapter{client.Logical()},
+	}
+}
+
+func (a *vaultClientAdapter) Logical() logicalInterface {
+	return a.logical
+}
+
+// logicalAdapter adapts api.Logical to our interface
+type logicalAdapter struct {
+	*api.Logical
+}
+
+func (a *logicalAdapter) Read(path string) (*api.Secret, error) {
+	return a.Logical.Read(path)
+}
+
+func (a *logicalAdapter) Write(path string, data map[string]interface{}) (*api.Secret, error) {
+	return a.Logical.Write(path, data)
+}
+
 // Client wraps HashiCorp Vault's Transit engine client
 // Handles:
 // - Signing operations with JWS format
@@ -23,9 +64,8 @@ import (
 // - Key version management
 // - Key rotation
 type Client struct {
-	client      *api.Client
+	client      vaultClientInterface
 	transitPath string
-	keyVersion  int64
 	keyType     string
 	hash        crypto.Hash
 	algorithm   algorithms.Algorithm
@@ -66,28 +106,24 @@ func NewClient(config Config, algorithm algorithms.Algorithm) (*Client, error) {
 	vaultConfig := api.DefaultConfig()
 	vaultConfig.Address = config.Address
 
-	client, err := api.NewClient(vaultConfig)
+	apiClient, err := api.NewClient(vaultConfig)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create vault client: %w", err)
 	}
 
-	client.SetToken(config.Token)
+	apiClient.SetToken(config.Token)
+
+	// Create adapter
+	vaultClient := newVaultClientAdapter(apiClient)
 
 	// Create client instance
 	vc := &Client{
-		client:      client,
+		client:      vaultClient,
 		transitPath: config.TransitPath,
 		keyType:     algorithm.VaultKeyType(),
 		hash:        algorithm.Hash(),
 		algorithm:   algorithm,
 	}
-
-	// Get initial key version
-	version, err := vc.GetCurrentKeyVersion()
-	if err != nil {
-		return nil, err
-	}
-	vc.keyVersion = version
 
 	// Validate key type matches configuration
 	if err := vc.validateKeyType(); err != nil {
@@ -206,7 +242,9 @@ func (c *Client) GetPublicKey(ctx context.Context, version string) (interface{},
 // SignData signs data using the transit engine with algorithm-specific params
 // Returns the signature in JWS format (base64url encoded)
 // Uses marshaling_algorithm=jws for consistent JWT format
-func (c *Client) SignData(ctx context.Context, data []byte) (string, error) {
+func (c *Client) SignData(
+	ctx context.Context, data []byte, keyVersion int64,
+) (string, error) {
 	// Hash the input data first
 	hash := c.hash.New()
 	hash.Write(data)
@@ -218,6 +256,7 @@ func (c *Client) SignData(ctx context.Context, data []byte) (string, error) {
 	// Prepare signing parameters
 	params := c.algorithm.SigningParams()
 	params["input"] = input
+	params["key_version"] = keyVersion
 
 	secret, err := c.client.Logical().Write(path, params)
 	if err != nil {
@@ -251,13 +290,6 @@ func (c *Client) RotateKey(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("failed to rotate key: %w", err)
 	}
-
-	// Update current key version
-	version, err := c.GetCurrentKeyVersion()
-	if err != nil {
-		return err
-	}
-	c.keyVersion = version
 
 	return nil
 }
