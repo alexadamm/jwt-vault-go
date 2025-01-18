@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"math/big"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/alexadamm/jwt-vault-go/pkg/jwks"
@@ -30,14 +31,21 @@ var DefaultConfig = Config{
 type JWKSCacheInterface interface {
 	GetKey(ctx context.Context, kid string) (interface{}, error)
 	GetKeyWithType(ctx context.Context, kid string) (interface{}, jwks.KeyType, error)
+	Clear()
 }
 
 // jwtVault implements the JWTVault interface
 type jwtVault struct {
-	vaultClient VaultClient
-	jwksCache   JWKSCacheInterface
-	config      Config
-	algorithm   algorithms.Algorithm // Default algorithm
+	vaultClient  VaultClient
+	jwksCache    JWKSCacheInterface
+	config       Config
+	algorithm    algorithms.Algorithm // Default algorithm
+	versionCache struct {
+		sync.RWMutex
+		version   int64
+		fetchedAt time.Time
+		ttl       time.Duration
+	}
 }
 
 // New creates a new JWTVault instance
@@ -70,12 +78,29 @@ func New(config Config) (JWTVault, error) {
 		KeyFetchFunc:    vaultClient.GetPublicKey,
 	})
 
-	return &jwtVault{
+	jv := &jwtVault{
 		vaultClient: vaultClient,
 		jwksCache:   jwksCache,
 		config:      config,
 		algorithm:   algorithm,
-	}, nil
+	}
+
+	// Initialize version cache
+	jv.versionCache.ttl = config.CacheTTL
+	if jv.versionCache.ttl == 0 {
+		jv.versionCache.ttl = 5 * time.Minute
+	}
+
+	// Get initial version
+	version, err := vaultClient.GetCurrentKeyVersion()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get initial key version: %w", err)
+	}
+
+	jv.versionCache.version = version
+	jv.versionCache.fetchedAt = time.Now()
+
+	return jv, nil
 }
 
 // Sign creates a new JWT with the provided claims

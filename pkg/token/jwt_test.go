@@ -256,6 +256,7 @@ func getKeyTypeForAlg(alg string) string {
 type mockJWKSCache struct {
 	getKeyFunc     func(ctx context.Context, kid string) (interface{}, error)
 	getKeyWithType func(ctx context.Context, kid string) (interface{}, jwks.KeyType, error)
+	clearFunc      func()
 }
 
 func (m *mockJWKSCache) GetKey(ctx context.Context, kid string) (interface{}, error) {
@@ -270,6 +271,12 @@ func (m *mockJWKSCache) GetKeyWithType(ctx context.Context, kid string) (interfa
 		return m.getKeyWithType(ctx, kid)
 	}
 	return nil, 0, nil
+}
+
+func (m *mockJWKSCache) Clear() {
+	if m.clearFunc != nil {
+		m.clearFunc()
+	}
 }
 
 func TestJWTClaims(t *testing.T) {
