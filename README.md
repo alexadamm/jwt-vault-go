@@ -7,11 +7,14 @@ JWT-Vault-Go is a Go library that provides seamless integration between JWT (JSO
 - Multiple algorithm support (ECDSA, RSA, RSA-PSS)
 - JWS signature format
 - Automatic JWKS caching and rotation
-- Thread-safe operations
+- Thread-safe operations with optimized concurrent access
 - Built-in token validation
 - Custom claims support
 - Health checking
 - Production-ready defaults
+- Version caching to minimize Vault calls
+- Distributed system support with manual state refresh
+- Comprehensive error handling
 
 ## Installation
 
@@ -40,6 +43,7 @@ func main() {
         VaultToken:     "your-token",
         TransitKeyPath: "jwt-key",
         Algorithm:      "ES256",  // Select your preferred algorithm
+        CacheTTL:      5 * time.Minute, // Optional: Configure cache TTL
     })
     if err != nil {
         log.Fatal(err)
@@ -66,6 +70,29 @@ func main() {
     }
     fmt.Printf("Verified Claims: %+v\n", verified.Claims)
 }
+```
+
+## Performance Features
+
+### Version Caching
+JWT-Vault-Go implements intelligent caching of key versions to minimize Vault API calls:
+
+```go
+// Version caching is automatic
+jv, err := token.New(token.Config{
+    VaultAddr:      "http://localhost:8200",
+    VaultToken:     "your-token",
+    TransitKeyPath: "jwt-key",
+    CacheTTL:      5 * time.Minute, // Controls both JWKS and version cache
+})
+```
+
+### Distributed Systems Support
+For distributed deployments, you can manually refresh the key state:
+
+```go
+// Refresh key state without rotation
+err := jv.RefreshKeyState(context.Background())
 ```
 
 ## Supported Algorithms
@@ -122,7 +149,7 @@ type Config struct {
     // Algorithm specifies the signing algorithm (e.g., "ES256", "RS256", "PS256")
     Algorithm string
 
-    // CacheTTL is the TTL for the JWKS cache (default: 5m)
+    // CacheTTL is the TTL for both JWKS and version caches (default: 5m)
     CacheTTL time.Duration
 
     // RetryConfig configures the retry behavior
@@ -133,11 +160,27 @@ type Config struct {
 }
 ```
 
-## Key Rotation
+## Key Management
+
+### Key Rotation
 JWT-Vault-Go supports automatic key rotation through Vault's Transit engine:
 ```go
 // Rotate the signing key
 err := jv.RotateKey(context.Background())
+```
+
+### State Synchronization
+For distributed systems, you can manually sync key state:
+```go
+// Refresh state from Vault (useful in multi-node deployments)
+err := jv.RefreshKeyState(context.Background())
+```
+
+### Cache Management
+Clear the JWKS cache if needed:
+```go
+// The cache interface is accessible through the JWKS cache
+jwksCache.Clear()
 ```
 
 ## Health Checking
@@ -146,8 +189,21 @@ health, err := jv.Health(context.Background())
 fmt.Printf("Health Status: %v\n", health.Message)
 ```
 
+## Thread Safety
+All operations in JWT-Vault-Go are thread-safe and optimized for concurrent access:
+- Read-Write mutex for version caching
+- Thread-safe JWKS cache operations
+- Safe concurrent token signing and verification
+- Atomic state updates during rotation
+
 ## Examples
-See the [examples](examples) directory for more examples.
+See the [examples](examples) directory for more detailed examples including:
+- Custom claims
+- Key rotation
+- HTTP middleware
+- Error handling
+- Algorithm selection
+- Validation
 
 ## Contributing
 Contributions are welcome! Please read our [Contributing Guidelines](CONTRIBUTING.md) for details.
