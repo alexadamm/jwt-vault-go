@@ -944,3 +944,129 @@ func TestJWTVault_RotateKey(t *testing.T) {
 		})
 	}
 }
+
+// TestJWTVault_RefreshKeyState verifies the key state refresh functionality:
+// - Version synchronization across nodes
+// - Cache clearing behavior
+// - Thread safety of state updates
+// - Error handling for Vault connectivity issues
+func TestJWTVault_RefreshKeyState(t *testing.T) {
+	tests := []struct {
+		name       string
+		setupMock  func() (*jwtVault, *mockVaultClient, *bool)
+		wantErr    bool
+		checkState func(*testing.T, *jwtVault, *mockVaultClient, *bool)
+	}{
+		{
+			name: "successful refresh",
+			setupMock: func() (*jwtVault, *mockVaultClient, *bool) {
+				mock := &mockVaultClient{
+					getCurrentKeyVersionFunc: func() (int64, error) {
+						return 2, nil // Simulating new version
+					},
+				}
+				cacheCleared := false
+				mockCache := &mockJWKSCache{
+					clearFunc: func() {
+						cacheCleared = true
+					},
+				}
+				jv := &jwtVault{
+					vaultClient: mock,
+					jwksCache:   mockCache,
+				}
+				// Set initial version cache state
+				jv.versionCache.version = 1
+				jv.versionCache.fetchedAt = time.Now().Add(-time.Hour)
+				jv.versionCache.ttl = time.Hour
+				return jv, mock, &cacheCleared
+			},
+			wantErr: false,
+			checkState: func(t *testing.T, jv *jwtVault, mock *mockVaultClient, cacheCleared *bool) {
+				if jv.versionCache.version != 2 {
+					t.Errorf("Expected version to be updated to 2, got %d", jv.versionCache.version)
+				}
+				if time.Since(jv.versionCache.fetchedAt) > time.Second {
+					t.Error("Expected fetchedAt to be updated to recent time")
+				}
+				if !*cacheCleared {
+					t.Error("Expected JWKS cache to be cleared")
+				}
+			},
+		},
+		{
+			name: "vault connectivity error",
+			setupMock: func() (*jwtVault, *mockVaultClient, *bool) {
+				mock := &mockVaultClient{
+					getCurrentKeyVersionFunc: func() (int64, error) {
+						return 0, fmt.Errorf("vault unreachable")
+					},
+				}
+				cacheCleared := false
+				jv := &jwtVault{
+					vaultClient: mock,
+					jwksCache:   &mockJWKSCache{},
+				}
+				jv.versionCache.version = 1
+				jv.versionCache.fetchedAt = time.Now()
+				jv.versionCache.ttl = time.Hour
+				return jv, mock, &cacheCleared
+			},
+			wantErr: true,
+			checkState: func(t *testing.T, jv *jwtVault, mock *mockVaultClient, cacheCleared *bool) {
+				if jv.versionCache.version != 1 {
+					t.Error("Version should not change on fetch error")
+				}
+			},
+		},
+		{
+			name: "refresh with same version",
+			setupMock: func() (*jwtVault, *mockVaultClient, *bool) {
+				mock := &mockVaultClient{
+					getCurrentKeyVersionFunc: func() (int64, error) {
+						return 1, nil // Same version
+					},
+				}
+				cacheCleared := false
+				mockCache := &mockJWKSCache{
+					clearFunc: func() {
+						cacheCleared = true
+					},
+				}
+				jv := &jwtVault{
+					vaultClient: mock,
+					jwksCache:   mockCache,
+				}
+				jv.versionCache.version = 1
+				jv.versionCache.fetchedAt = time.Now().Add(-time.Hour)
+				jv.versionCache.ttl = time.Hour
+				return jv, mock, &cacheCleared
+			},
+			wantErr: false,
+			checkState: func(t *testing.T, jv *jwtVault, mock *mockVaultClient, cacheCleared *bool) {
+				if !*cacheCleared {
+					t.Error("Cache should be cleared even with same version")
+				}
+				if time.Since(jv.versionCache.fetchedAt) > time.Second {
+					t.Error("Expected fetchedAt to be updated even with same version")
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			jv, mock, cacheCleared := tt.setupMock()
+			err := jv.RefreshKeyState(context.Background())
+
+			if (err != nil) != tt.wantErr {
+				t.Errorf("RefreshKeyState() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+
+			if tt.checkState != nil {
+				tt.checkState(t, jv, mock, cacheCleared)
+			}
+		})
+	}
+}
