@@ -798,3 +798,149 @@ func TestJWTVault_GetPublicKey(t *testing.T) {
 		})
 	}
 }
+
+func TestJWTVault_RotateKey(t *testing.T) {
+	var cacheCleared bool
+	tests := []struct {
+		name       string
+		setupMock  func() (*jwtVault, *mockVaultClient)
+		wantErr    bool
+		checkState func(*testing.T, *jwtVault, *mockVaultClient)
+	}{
+		{
+			name: "successful rotation",
+			setupMock: func() (*jwtVault, *mockVaultClient) {
+				mock := &mockVaultClient{
+					rotateKeyFunc: func(ctx context.Context) error {
+						return nil
+					},
+					getCurrentKeyVersionFunc: func() (int64, error) {
+						return 2, nil // Simulating incremented version
+					},
+				}
+				jv := &jwtVault{
+					vaultClient: mock,
+					jwksCache:   &mockJWKSCache{},
+				}
+				// Set initial version cache state
+				jv.versionCache.version = 1
+				jv.versionCache.fetchedAt = time.Now().Add(-time.Hour)
+				jv.versionCache.ttl = time.Hour
+				return jv, mock
+			},
+			wantErr: false,
+			checkState: func(t *testing.T, jv *jwtVault, mock *mockVaultClient) {
+				if jv.versionCache.version != 2 {
+					t.Errorf("Expected version to be updated to 2, got %d", jv.versionCache.version)
+				}
+				if time.Since(jv.versionCache.fetchedAt) > time.Second {
+					t.Error("Expected fetchedAt to be updated to recent time")
+				}
+			},
+		},
+		{
+			name: "rotation failure",
+			setupMock: func() (*jwtVault, *mockVaultClient) {
+				mock := &mockVaultClient{
+					rotateKeyFunc: func(ctx context.Context) error {
+						return fmt.Errorf("rotation failed")
+					},
+				}
+				jv := &jwtVault{
+					vaultClient: mock,
+					jwksCache:   &mockJWKSCache{},
+				}
+				// Set initial version cache state
+				jv.versionCache.version = 1
+				jv.versionCache.fetchedAt = time.Now()
+				jv.versionCache.ttl = time.Hour
+				return jv, mock
+			},
+			wantErr: true,
+			checkState: func(t *testing.T, jv *jwtVault, mock *mockVaultClient) {
+				if jv.versionCache.version != 1 {
+					t.Error("Version should not change on rotation failure")
+				}
+			},
+		},
+		{
+			name: "version fetch failure after rotation",
+			setupMock: func() (*jwtVault, *mockVaultClient) {
+				mock := &mockVaultClient{
+					rotateKeyFunc: func(ctx context.Context) error {
+						return nil
+					},
+					getCurrentKeyVersionFunc: func() (int64, error) {
+						return 0, fmt.Errorf("version fetch failed")
+					},
+				}
+				jv := &jwtVault{
+					vaultClient: mock,
+					jwksCache:   &mockJWKSCache{},
+				}
+				jv.versionCache.version = 1
+				jv.versionCache.fetchedAt = time.Now()
+				jv.versionCache.ttl = time.Hour
+				return jv, mock
+			},
+			wantErr: true,
+			checkState: func(t *testing.T, jv *jwtVault, mock *mockVaultClient) {
+				if jv.versionCache.version != 1 {
+					t.Error("Version should not change on version fetch failure")
+				}
+			},
+		},
+		{
+			name: "verify cache clearing",
+			setupMock: func() (*jwtVault, *mockVaultClient) {
+				mock := &mockVaultClient{
+					rotateKeyFunc: func(ctx context.Context) error {
+						return nil
+					},
+					getCurrentKeyVersionFunc: func() (int64, error) {
+						return 2, nil
+					},
+				}
+				mockCache := &mockJWKSCache{
+					clearFunc: func() {
+						cacheCleared = true
+					},
+				}
+				jv := &jwtVault{
+					vaultClient: mock,
+					jwksCache:   mockCache,
+				}
+				jv.versionCache.version = 1
+				jv.versionCache.fetchedAt = time.Now()
+				jv.versionCache.ttl = time.Hour
+				return jv, mock
+			},
+			wantErr: false,
+			checkState: func(t *testing.T, jv *jwtVault, mock *mockVaultClient) {
+				_, ok := jv.jwksCache.(*mockJWKSCache)
+				if !ok {
+					t.Fatal("Expected mockJWKSCache")
+				}
+				if !cacheCleared {
+					t.Error("Expected JWKS cache to be cleared")
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			jv, mock := tt.setupMock()
+			err := jv.RotateKey(context.Background())
+
+			if (err != nil) != tt.wantErr {
+				t.Errorf("RotateKey() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+
+			if tt.checkState != nil {
+				tt.checkState(t, jv, mock)
+			}
+		})
+	}
+}
