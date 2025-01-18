@@ -103,9 +103,38 @@ func New(config Config) (JWTVault, error) {
 	return jv, nil
 }
 
-// Sign creates a new JWT with the provided claims
+func (j *jwtVault) getCurrentKeyVersion() (int64, error) {
+	j.versionCache.RLock()
+	if time.Since(j.versionCache.fetchedAt) < j.versionCache.ttl {
+		version := j.versionCache.version
+		j.versionCache.RUnlock()
+		return version, nil
+	}
+	j.versionCache.RUnlock()
+
+	// Need to refresh
+	j.versionCache.Lock()
+	defer j.versionCache.Unlock()
+
+	// Double check after acquiring write lock
+	if time.Since(j.versionCache.fetchedAt) < j.versionCache.ttl {
+		return j.versionCache.version, nil
+	}
+
+	// Fetch new version
+	version, err := j.vaultClient.GetCurrentKeyVersion()
+	if err != nil {
+		return 0, err
+	}
+
+	j.versionCache.version = version
+	j.versionCache.fetchedAt = time.Now()
+
+	return version, nil
+}
+
 func (j *jwtVault) Sign(ctx context.Context, claims interface{}) (string, error) {
-	keyVersion, err := j.vaultClient.GetCurrentKeyVersion()
+	keyVersion, err := j.getCurrentKeyVersion()
 	if err != nil {
 		return "", fmt.Errorf("failed to get key version: %w", err)
 	}
