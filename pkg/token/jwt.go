@@ -256,7 +256,27 @@ func (j *jwtVault) GetPublicKey(ctx context.Context, kid string) (interface{}, e
 
 // RotateKey triggers a rotation of the signing key
 func (j *jwtVault) RotateKey(ctx context.Context) error {
-	return j.vaultClient.RotateKey(ctx)
+	err := j.vaultClient.RotateKey(ctx)
+	if err != nil {
+		return err
+	}
+
+	// Immediately update cached version after rotation
+	j.versionCache.Lock()
+	defer j.versionCache.Unlock()
+
+	version, err := j.vaultClient.GetCurrentKeyVersion()
+	if err != nil {
+		return err
+	}
+
+	j.versionCache.version = version
+	j.versionCache.fetchedAt = time.Now()
+
+	// Clear JWKS cache since keys changed
+	j.jwksCache.Clear()
+
+	return nil
 }
 
 // Health returns the current health status
