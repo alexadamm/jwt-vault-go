@@ -66,7 +66,6 @@ func (a *logicalAdapter) Write(path string, data map[string]interface{}) (*api.S
 type Client struct {
 	client      vaultClientInterface
 	transitPath string
-	keyVersion  int64
 	keyType     string
 	hash        crypto.Hash
 	algorithm   algorithms.Algorithm
@@ -125,13 +124,6 @@ func NewClient(config Config, algorithm algorithms.Algorithm) (*Client, error) {
 		hash:        algorithm.Hash(),
 		algorithm:   algorithm,
 	}
-
-	// Get initial key version
-	version, err := vc.GetCurrentKeyVersion()
-	if err != nil {
-		return nil, err
-	}
-	vc.keyVersion = version
 
 	// Validate key type matches configuration
 	if err := vc.validateKeyType(); err != nil {
@@ -250,7 +242,9 @@ func (c *Client) GetPublicKey(ctx context.Context, version string) (interface{},
 // SignData signs data using the transit engine with algorithm-specific params
 // Returns the signature in JWS format (base64url encoded)
 // Uses marshaling_algorithm=jws for consistent JWT format
-func (c *Client) SignData(ctx context.Context, data []byte) (string, error) {
+func (c *Client) SignData(
+	ctx context.Context, data []byte, keyVersion int64,
+) (string, error) {
 	// Hash the input data first
 	hash := c.hash.New()
 	hash.Write(data)
@@ -262,6 +256,7 @@ func (c *Client) SignData(ctx context.Context, data []byte) (string, error) {
 	// Prepare signing parameters
 	params := c.algorithm.SigningParams()
 	params["input"] = input
+	params["key_version"] = keyVersion
 
 	secret, err := c.client.Logical().Write(path, params)
 	if err != nil {
@@ -295,13 +290,6 @@ func (c *Client) RotateKey(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("failed to rotate key: %w", err)
 	}
-
-	// Update current key version
-	version, err := c.GetCurrentKeyVersion()
-	if err != nil {
-		return err
-	}
-	c.keyVersion = version
 
 	return nil
 }

@@ -163,7 +163,7 @@ func (j *jwtVault) Sign(ctx context.Context, claims interface{}) (string, error)
 	signingInput := headerB64 + "." + claimsB64
 
 	// Sign the data with Vault
-	signature, err := j.vaultClient.SignData(ctx, []byte(signingInput))
+	signature, err := j.vaultClient.SignData(ctx, []byte(signingInput), keyVersion)
 	if err != nil {
 		return "", fmt.Errorf("failed to sign token: %w", err)
 	}
