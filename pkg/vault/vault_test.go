@@ -118,7 +118,9 @@ func TestVaultClient(t *testing.T) {
 			t.Run("Sign Data", func(t *testing.T) {
 				ctx := context.Background()
 				data := []byte("test data")
-				signature, err := client.SignData(ctx, data)
+				// Use a fixed version for testing
+				const testVersion int64 = 1
+				signature, err := client.SignData(ctx, data, testVersion)
 				if err != nil {
 					t.Errorf("Failed to sign data: %v", err)
 				}
@@ -131,12 +133,25 @@ func TestVaultClient(t *testing.T) {
 
 			t.Run("Rotate Key", func(t *testing.T) {
 				ctx := context.Background()
-				initialVersion := client.keyVersion
-				err := client.RotateKey(ctx)
+
+				// Get initial version
+				initialVersion, err := client.GetCurrentKeyVersion()
+				if err != nil {
+					t.Fatalf("Failed to get initial version: %v", err)
+				}
+
+				// Rotate key
+				err = client.RotateKey(ctx)
 				if err != nil {
 					t.Errorf("Failed to rotate key: %v", err)
 				}
-				if client.keyVersion <= initialVersion {
+
+				// Get new version and verify it increased
+				newVersion, err := client.GetCurrentKeyVersion()
+				if err != nil {
+					t.Fatalf("Failed to get new version: %v", err)
+				}
+				if newVersion <= initialVersion {
 					t.Error("Key version did not increase after rotation")
 				}
 			})
@@ -283,7 +298,9 @@ func TestVaultClientErrors(t *testing.T) {
 			keyType:     alg.VaultKeyType(),
 		}
 
-		_, err := client.SignData(context.Background(), []byte("test data"))
+		// Use a fixed version for testing
+		const testVersion int64 = 1
+		_, err := client.SignData(context.Background(), []byte("test data"), testVersion)
 		if err == nil {
 			t.Error("Expected error from SignData")
 		}
@@ -314,7 +331,9 @@ func TestVaultClientErrors(t *testing.T) {
 			keyType:     alg.VaultKeyType(),
 		}
 
-		_, err := client.SignData(context.Background(), []byte("test data"))
+		// Use a fixed version for testing
+		const testVersion int64 = 1
+		_, err := client.SignData(context.Background(), []byte("test data"), testVersion)
 		if err == nil {
 			t.Error("Expected error from SignData")
 		}
@@ -345,7 +364,9 @@ func TestVaultClientErrors(t *testing.T) {
 			keyType:     alg.VaultKeyType(),
 		}
 
-		_, err := client.SignData(context.Background(), []byte("test data"))
+		// Use a fixed version for testing
+		const testVersion int64 = 1
+		_, err := client.SignData(context.Background(), []byte("test data"), testVersion)
 		if err == nil {
 			t.Error("Expected error from SignData")
 		}
